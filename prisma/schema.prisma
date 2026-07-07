@@ -1,0 +1,153 @@
+// Prisma Schema for 服务器控制台
+// 默认使用 SQLite（MVP 本地零依赖启动）。
+// 切换 PostgreSQL：将下方 provider 改为 "postgresql"，并把 .env 中的
+// DATABASE_URL 改为 postgresql 连接串即可。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ===== 1. 用户表：代理商主账号 + 客户子账号 =====
+model User {
+  id           String    @id @default(cuid())
+  // 客户所属代理商；代理商主账号自身该字段为 null
+  parentId     String?   @map("parent_id")
+  parent       User?     @relation("CustomerToReseller", fields: [parentId], references: [id], onDelete: Restrict)
+  customers    User[]    @relation("CustomerToReseller")
+
+  // reseller_admin | customer
+  role         String
+  username     String    @unique
+  passwordHash String    @map("password_hash")
+  displayName  String    @map("display_name")
+  // active | disabled
+  status       String    @default("active")
+  remark       String?
+  phone        String?
+  email        String?
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  apiTokens           ResellerApiToken[]
+  // 作为代理商拥有的服务器分配记录
+  assignmentsAsReseller ServerAssignment[] @relation("AssignmentReseller")
+  // 作为客户被分配的服务器记录
+  assignmentsAsCustomer ServerAssignment[] @relation("AssignmentCustomer")
+  // 作为代理商维度的日志
+  logsAsReseller      OperationLog[] @relation("LogReseller")
+  // 作为操作者本人的日志
+  logsAsUser          OperationLog[] @relation("LogUser")
+  // 代理商拥有的服务器缓存
+  serverCache         ServerCache[] @relation("ServerCacheOwner")
+
+  @@index([parentId])
+  @@map("users")
+}
+
+// ===== 2. 代理商 API Token（加密存储，绝不出前端）=====
+model ResellerApiToken {
+  id             String    @id @default(cuid())
+  resellerId     String    @unique @map("reseller_id")
+  reseller       User      @relation(fields: [resellerId], references: [id], onDelete: Cascade)
+  tokenEncrypted String    @map("token_encrypted")
+  // 用于校验密钥是否变化导致无法解密
+  tokenKeyHint   String?   @map("token_key_hint")
+  // active | invalid | revoked
+  status         String    @default("active")
+  // 仅展示用：返回后 4 位
+  tokenSuffix    String?   @map("token_suffix")
+  lastVerifiedAt DateTime? @map("last_verified_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@map("reseller_api_tokens")
+}
+
+// ===== 3. 服务器本地缓存（来自上游 /instance/list）=====
+model ServerCache {
+  id                String    @id @default(cuid())
+  resellerId        String    @map("reseller_id")
+  reseller          User      @relation("ServerCacheOwner", fields: [resellerId], references: [id], onDelete: Cascade)
+  ecsResourceUuid   String    @map("ecs_resource_uuid")
+  instanceName      String?   @map("instance_name")
+  publicIpAddress   String?   @map("public_ip_address")
+  internalIpAddress String?   @map("internal_ip_address")
+  regionCode        String?   @map("region_code")
+  regionName        String?   @map("region_name")
+  zoneCode          String?   @map("zone_code")
+  zoneName          String?   @map("zone_name")
+  cpu               Int?
+  memory            Int?
+  bandwidth         Int?
+  osName            String?   @map("os_name")
+  osVersionDetail   String?   @map("os_version_detail")
+  ecsStatus         String?   @map("ecs_status")
+  ecsPendingStatus  String?   @map("ecs_pending_status")
+  expireTime        DateTime? @map("expire_time")
+  rawJson           String?
+  lastSyncedAt      DateTime  @default(now()) @map("last_synced_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  assignments       ServerAssignment[]
+
+  @@unique([resellerId, ecsResourceUuid])
+  @@index([resellerId])
+  @@map("server_cache")
+}
+
+// ===== 4. 服务器分配关系：一台服务器同时只能分给一个客户 =====
+model ServerAssignment {
+  id              String    @id @default(cuid())
+  resellerId      String    @map("reseller_id")
+  reseller        User      @relation("AssignmentReseller", fields: [resellerId], references: [id], onDelete: Cascade)
+  customerId      String    @map("customer_id")
+  customer        User      @relation("AssignmentCustomer", fields: [customerId], references: [id], onDelete: Cascade)
+  ecsResourceUuid String    @map("ecs_resource_uuid")
+  server          ServerCache? @relation(fields: [resellerId, ecsResourceUuid], references: [resellerId, ecsResourceUuid], onDelete: Restrict)
+  // active | revoked
+  status          String    @default("active")
+  assignedAt      DateTime  @default(now()) @map("assigned_at")
+  unassignedAt    DateTime? @map("unassigned_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([resellerId, ecsResourceUuid])
+  @@index([customerId])
+  @@map("server_assignments")
+}
+
+// ===== 5. 操作日志 =====
+model OperationLog {
+  id              String    @id @default(cuid())
+  resellerId      String    @map("reseller_id")
+  reseller        User      @relation("LogReseller", fields: [resellerId], references: [id], onDelete: Cascade)
+  userId          String    @map("user_id")
+  user            User      @relation("LogUser", fields: [userId], references: [id], onDelete: Cascade)
+  userRole        String    @map("user_role")
+  ecsResourceUuid String    @map("ecs_resource_uuid")
+  // start | stop | restart | modify_password | sync_server | assign_server | unassign_server | login | ...
+  action          String
+  requestPayload  String?
+  asyncTaskUuid   String?   @map("async_task_uuid")
+  // PENDING | FINISHED | FAILED | UNKNOWN
+  taskStatus      String?   @map("task_status")
+  // SUCCESS | FAILED | null（无异步任务时）
+  processResult   String?   @map("process_result")
+  errMsg          String?   @map("err_msg")
+  requestIp       String?   @map("request_ip")
+  userAgent       String?   @map("user_agent")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([resellerId, createdAt])
+  @@index([userId, createdAt])
+  @@index([ecsResourceUuid])
+  @@map("operation_logs")
+}
