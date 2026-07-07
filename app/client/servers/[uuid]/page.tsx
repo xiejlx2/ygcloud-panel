@@ -103,7 +103,6 @@ export default function ClientServerDetailPage() {
             <ServerActionButtons
               uuid={data.ecsResourceUUID}
               role="customer"
-              canModifyPassword={false}
               onDone={() => mutate()}
             />
             <p className="mt-3 text-xs text-slate-400">

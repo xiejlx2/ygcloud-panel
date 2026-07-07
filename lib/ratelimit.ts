@@ -59,6 +59,7 @@ export const RL = {
   login: { capacity: 5, windowMs: 10 * 60 * 1000 }, // 5 次 / 10 分钟
   powerOp: { capacity: 1, windowMs: 30 * 1000 }, // 开/关/重启 1 次 / 30 秒
   modifyPwd: { capacity: 3, windowMs: 10 * 60 * 1000 }, // 改密码 3 次 / 10 分钟
+  reinstall: { capacity: 1, windowMs: 5 * 60 * 1000 }, // 重装系统 1 次 / 5 分钟（破坏性，严格限流）
   syncServer: { capacity: 1, windowMs: 60 * 1000 }, // 同步 1 次 / 60 秒
   // 客户列表页触发的后台刷新：按代理商维度全局兜底，防止客户狂刷
   // 把 listInstances 的多区域扇出调用放大、打挂代理商 Token。

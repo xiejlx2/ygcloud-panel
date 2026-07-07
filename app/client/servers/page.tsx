@@ -24,7 +24,7 @@ interface Server {
   lastSyncedAt: string | null;
 }
 
-const COLS = 8;
+const COLS = 4;
 
 export default function ClientServersPage() {
   const { data, error, isLoading, mutate } = useSWR<{ items: Server[] }>(
@@ -48,14 +48,10 @@ export default function ClientServersPage() {
           <table className="table-base">
             <thead>
               <tr>
-                <th>名称</th>
-                <th>公网 IP</th>
-                <th>状态</th>
+                <th>服务器</th>
                 <th>配置</th>
-                <th>地区</th>
-                <th>系统</th>
-                <th>到期</th>
-                <th>操作</th>
+                <th>状态</th>
+                <th className="text-right">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -80,26 +76,37 @@ export default function ClientServersPage() {
                     >
                       {s.instanceName || "—"}
                     </Link>
-                    <div className="font-mono text-[11px] text-slate-400">{s.ecsResourceUUID}</div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
+                      <span className="font-mono text-slate-500">
+                        {s.publicIpAddress || "无公网 IP"}
+                      </span>
+                      <span className="font-mono text-slate-300">{s.ecsResourceUUID}</span>
+                    </div>
                   </td>
-                  <td className="font-mono text-xs">{s.publicIpAddress || "—"}</td>
+                  <td>
+                    <div className="flex flex-wrap gap-1">
+                      <span className="chip">{s.cpu ?? "—"} vCPU</span>
+                      <span className="chip">{s.memory ?? "—"} GB</span>
+                      {s.bandwidth != null && <span className="chip">{s.bandwidth} Mbps</span>}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-400">
+                      {s.regionName || "—"}
+                      {s.osVersionDetail ? ` · ${s.osVersionDetail}` : ""}
+                    </div>
+                  </td>
                   <td>
                     <StatusBadge value={s.ecsStatus} />
-                  </td>
-                  <td className="whitespace-nowrap text-xs text-slate-600">
-                    {s.cpu ?? "—"} vCPU / {s.memory ?? "—"} GB
-                    {s.bandwidth != null && ` / ${s.bandwidth}M`}
-                  </td>
-                  <td className="whitespace-nowrap text-xs">{s.regionName || "—"}</td>
-                  <td className="text-xs">{s.osVersionDetail || "—"}</td>
-                  <td className="whitespace-nowrap text-xs text-slate-500">
-                    {s.expireTime ? new Date(s.expireTime).toLocaleDateString() : "—"}
+                    {s.expireTime && (
+                      <div className="mt-1 text-xs text-slate-400">
+                        到期 {new Date(s.expireTime).toLocaleDateString()}
+                      </div>
+                    )}
                   </td>
                   <td>
                     <ServerActionButtons
                       uuid={s.ecsResourceUUID}
                       role="customer"
-                      canModifyPassword={false}
+                      variant="menu"
                       onDone={() => mutate()}
                     />
                   </td>

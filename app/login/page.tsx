@@ -40,13 +40,12 @@ export default function LoginPage() {
 
       <div className="w-full max-w-sm">
         <div className="mb-6 flex justify-center">
-          <Logo subtitle="多租户服务器管理" />
+          <Logo />
         </div>
 
         <form onSubmit={submit} className="card space-y-4 p-6">
           <div>
             <h1 className="text-base font-semibold text-slate-900">登录到控制台</h1>
-            <p className="mt-1 text-xs text-slate-500">管理员与客户统一入口。</p>
           </div>
           <div>
             <label className="label">登录账号</label>

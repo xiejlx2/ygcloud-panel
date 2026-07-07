@@ -20,6 +20,8 @@ const ALLOWED_PATHS: Record<string, "GET" | "POST"> = {
   "/instance/stop": "POST",
   "/instance/restart": "POST",
   "/instance/modifyInstancePassword": "POST",
+  "/instance/reinstallSystem": "POST",
+  "/image/list": "GET",
   "/asynctask/getResult": "GET",
 };
 
@@ -364,6 +366,121 @@ function buildInstanceActionBody(
   if (opts?.regionCode) body.regionCode = opts.regionCode;
   if (opts?.zoneCode) body.zoneCode = opts.zoneCode;
   return body;
+}
+
+// ===== 镜像查询 + 重装系统 =====
+
+export interface ImageItem {
+  imageResourceUUID: string;
+  imageName?: string;
+  osVersion?: string;
+  osVersionDetail?: string;
+  osDistroVersion?: string;
+  imageAccount?: string;
+  imageType?: string;
+  regionCode?: string;
+  [k: string]: unknown;
+}
+
+// 需要从镜像列表中屏蔽的关键词（逗号分隔，命中即隐藏），由部署方在 .env 的
+// IMAGE_HIDE_KEYWORDS 配置。放到环境变量而非硬编码，使代码库本身不含任何服务商标识。
+const HIDE_KEYWORDS = (process.env.IMAGE_HIDE_KEYWORDS || "")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+
+function isBrandImage(i: ImageItem): boolean {
+  if (HIDE_KEYWORDS.length === 0) return false;
+  const hay = [i.imageName, i.osVersion, i.osVersionDetail, i.osDistroVersion]
+    .filter((v): v is string => typeof v === "string")
+    .join(" ")
+    .toLowerCase();
+  return HIDE_KEYWORDS.some((k) => hay.includes(k));
+}
+
+/**
+ * 查询可用镜像（用于重装系统时选择目标系统）。
+ * imageType：System（标准镜像）/ Application（应用镜像）/ Self（私有镜像）。
+ * 强制过滤掉带品牌字样的镜像（屏蔽上游标识）。
+ */
+export async function listImages(
+  resellerId: string,
+  opts?: { regionCode?: string; imageType?: string; page?: number; pageSize?: number },
+): Promise<ImageItem[]> {
+  const data = await cloudRequest<{ images?: ImageItem[] }>(
+    resellerId,
+    "/image/list",
+    {
+      method: "GET",
+      query: {
+        regionCode: opts?.regionCode,
+        imageType: opts?.imageType,
+        page: opts?.page ?? 1,
+        pageSize: opts?.pageSize ?? 50,
+      },
+    },
+  );
+  return (data?.images ?? []).filter(
+    (i) => i && i.imageResourceUUID && !isBrandImage(i),
+  );
+}
+
+/**
+ * 分页拉取某类镜像的全部条目（上限 5 页 / 250 条，避免异常时无限翻页）。
+ * 翻页依据“上游本页原始返回量”，品牌过滤在此之上叠加，不影响翻页判断。
+ */
+export async function listAllImages(
+  resellerId: string,
+  opts: { regionCode?: string; imageType: string },
+): Promise<ImageItem[]> {
+  const all: ImageItem[] = [];
+  const PAGE_SIZE = 50;
+  for (let page = 1; page <= 5; page++) {
+    const data = await cloudRequest<{ images?: ImageItem[] }>(
+      resellerId,
+      "/image/list",
+      {
+        method: "GET",
+        query: {
+          regionCode: opts.regionCode,
+          imageType: opts.imageType,
+          page,
+          pageSize: PAGE_SIZE,
+        },
+      },
+    );
+    const raw = (data?.images ?? []).filter((i) => i && i.imageResourceUUID);
+    all.push(...raw.filter((i) => !isBrandImage(i)));
+    if (raw.length < PAGE_SIZE) break; // 原始返回不足一页 → 已是最后一页
+  }
+  return all;
+}
+
+/**
+ * 重装系统（异步、破坏性）。
+ * 上游要求：目标服务器需先关机；重装会清空该服务器数据。
+ * regionCode 必填，zoneCode 可选。
+ */
+export async function reinstallSystem(
+  resellerId: string,
+  ecsResourceUUID: string,
+  params: {
+    imageResourceUUID: string;
+    password: string;
+    regionCode: string;
+    zoneCode?: string;
+  },
+): Promise<{ asyncTaskUUID?: string; status?: string }> {
+  return cloudRequest(resellerId, "/instance/reinstallSystem", {
+    method: "POST",
+    body: {
+      ecsResourceUUID,
+      imageResourceUUID: params.imageResourceUUID,
+      password: params.password,
+      regionCode: params.regionCode,
+      ...(params.zoneCode ? { zoneCode: params.zoneCode } : {}),
+    },
+  });
 }
 
 export interface AsyncTaskResult {

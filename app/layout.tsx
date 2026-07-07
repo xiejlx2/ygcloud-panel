@@ -4,7 +4,7 @@ import { Providers } from "@/components/Providers";
 
 export const metadata: Metadata = {
   title: "服务器控制台",
-  description: "服务器控制台 — 多租户服务器管理平台",
+  description: "服务器控制台",
 };
 
 export default function RootLayout({

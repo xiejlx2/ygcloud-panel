@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { api, ApiError } from "@/components/Api";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -11,7 +11,14 @@ import { TableSkeleton } from "@/components/Skeleton";
 import { EmptyState } from "@/components/EmptyState";
 import { useToast } from "@/components/Toast";
 import { useConfirm } from "@/components/ConfirmDialog";
-import { IconServer, IconRefresh, IconLink, IconSpinner } from "@/components/Icons";
+import {
+  IconServer,
+  IconRefresh,
+  IconLink,
+  IconSpinner,
+  IconSearch,
+  IconX,
+} from "@/components/Icons";
 
 interface Server {
   ecsResourceUUID: string;
@@ -29,7 +36,7 @@ interface Server {
   assignedCustomerName: string | null;
 }
 
-const COLS = 10;
+const COLS = 6;
 
 export default function AdminServersPage() {
   const toast = useToast();
@@ -41,8 +48,18 @@ export default function AdminServersPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [assignOpen, setAssignOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [q, setQ] = useState("");
 
-  const items = data?.items ?? [];
+  const items = useMemo(() => data?.items ?? [], [data]);
+  const filtered = useMemo(() => {
+    const kw = q.trim().toLowerCase();
+    if (!kw) return items;
+    return items.filter((s) =>
+      [s.instanceName, s.publicIpAddress, s.ecsResourceUUID, s.regionName, s.assignedCustomerName]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(kw)),
+    );
+  }, [items, q]);
 
   function toggle(uuid: string) {
     setSelected((prev) => {
@@ -86,7 +103,9 @@ export default function AdminServersPage() {
     }
   }
 
-  const allChecked = items.length > 0 && selected.size === items.length;
+  const filteredUuids = filtered.map((i) => i.ecsResourceUUID);
+  const allChecked =
+    filtered.length > 0 && filteredUuids.every((u) => selected.has(u));
 
   return (
     <div className="space-y-5">
@@ -94,26 +113,52 @@ export default function AdminServersPage() {
         title="服务器"
         subtitle="同步、查看并把服务器分配给客户"
         actions={
-          <>
-            <button className="btn-default" disabled={syncing} onClick={sync}>
-              {syncing ? <IconSpinner className="h-4 w-4" /> : <IconRefresh className="h-4 w-4" />}
-              {syncing ? "同步中…" : "同步服务器"}
-            </button>
-            <button
-              className="btn-primary"
-              disabled={selected.size === 0}
-              onClick={() => setAssignOpen(true)}
-            >
-              <IconLink className="h-4 w-4" />
-              批量分配{selected.size > 0 ? `（${selected.size}）` : ""}
-            </button>
-          </>
+          <button className="btn-default" disabled={syncing} onClick={sync}>
+            {syncing ? <IconSpinner className="h-4 w-4" /> : <IconRefresh className="h-4 w-4" />}
+            {syncing ? "同步中…" : "同步服务器"}
+          </button>
         }
       />
+
+      {/* 搜索 + 计数 */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative w-full max-w-xs">
+          <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            className="input pl-9"
+            placeholder="搜索名称 / IP / 地区 / 客户"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </div>
+        <span className="text-sm text-slate-400">
+          共 {items.length} 台{q && `，匹配 ${filtered.length} 台`}
+        </span>
+      </div>
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {(error as Error).message}
+        </div>
+      )}
+
+      {/* 选择操作条 */}
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5">
+          <span className="text-sm font-medium text-brand-700">
+            已选 {selected.size} 台
+          </span>
+          <button className="btn-primary btn-sm" onClick={() => setAssignOpen(true)}>
+            <IconLink className="h-4 w-4" />
+            批量分配
+          </button>
+          <button
+            className="ml-auto inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
+            onClick={() => setSelected(new Set())}
+          >
+            <IconX className="h-4 w-4" />
+            清除选择
+          </button>
         </div>
       )}
 
@@ -127,40 +172,39 @@ export default function AdminServersPage() {
                     type="checkbox"
                     className="accent-brand"
                     onChange={(e) =>
-                      setSelected(
-                        e.target.checked
-                          ? new Set(items.map((i) => i.ecsResourceUUID))
-                          : new Set(),
-                      )
+                      setSelected((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) filteredUuids.forEach((u) => next.add(u));
+                        else filteredUuids.forEach((u) => next.delete(u));
+                        return next;
+                      })
                     }
                     checked={allChecked}
                   />
                 </th>
-                <th>名称</th>
-                <th>公网 IP</th>
-                <th>状态</th>
+                <th>服务器</th>
                 <th>配置</th>
-                <th>地区</th>
-                <th>系统</th>
-                <th>到期</th>
-                <th>分配</th>
-                <th>操作</th>
+                <th>状态</th>
+                <th>归属客户</th>
+                <th className="text-right">操作</th>
               </tr>
             </thead>
             <tbody>
               {isLoading && <TableSkeleton cols={COLS} rows={6} />}
-              {!isLoading && items.length === 0 && (
+              {!isLoading && filtered.length === 0 && (
                 <tr>
                   <td colSpan={COLS}>
                     <EmptyState
                       icon={<IconServer />}
-                      title="暂无服务器"
-                      description="点击右上角「同步服务器」拉取云端资源。"
+                      title={q ? "没有匹配的服务器" : "暂无服务器"}
+                      description={
+                        q ? "换个关键词试试。" : "点击右上角「同步服务器」拉取云端资源。"
+                      }
                     />
                   </td>
                 </tr>
               )}
-              {items.map((s) => (
+              {filtered.map((s) => (
                 <tr key={s.ecsResourceUUID}>
                   <td>
                     <input
@@ -170,29 +214,50 @@ export default function AdminServersPage() {
                       onChange={() => toggle(s.ecsResourceUUID)}
                     />
                   </td>
+
+                  {/* 服务器：名称 / IP / uuid */}
                   <td>
                     <div className="font-medium text-slate-800">{s.instanceName || "—"}</div>
-                    <div className="font-mono text-[11px] text-slate-400">{s.ecsResourceUUID}</div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
+                      <span className="font-mono text-slate-500">
+                        {s.publicIpAddress || "无公网 IP"}
+                      </span>
+                      <span className="font-mono text-slate-300">{s.ecsResourceUUID}</span>
+                    </div>
                   </td>
-                  <td className="font-mono text-xs">{s.publicIpAddress || "—"}</td>
+
+                  {/* 配置：规格 chips + 地区 · 系统 */}
+                  <td>
+                    <div className="flex flex-wrap gap-1">
+                      <span className="chip">{s.cpu ?? "—"} vCPU</span>
+                      <span className="chip">{s.memory ?? "—"} GB</span>
+                      {s.bandwidth != null && <span className="chip">{s.bandwidth} Mbps</span>}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-400">
+                      {s.regionName || "—"}
+                      {s.osVersionDetail ? ` · ${s.osVersionDetail}` : ""}
+                    </div>
+                  </td>
+
+                  {/* 状态 + 到期 */}
                   <td>
                     <StatusBadge value={s.ecsStatus} />
+                    {s.expireTime && (
+                      <div className="mt-1 text-xs text-slate-400">
+                        到期 {new Date(s.expireTime).toLocaleDateString()}
+                      </div>
+                    )}
                   </td>
-                  <td className="whitespace-nowrap text-xs text-slate-600">
-                    {s.cpu ?? "—"} vCPU / {s.memory ?? "—"} GB
-                    {s.bandwidth != null && ` / ${s.bandwidth}M`}
-                  </td>
-                  <td className="whitespace-nowrap text-xs">{s.regionName || "—"}</td>
-                  <td className="text-xs">{s.osVersionDetail || "—"}</td>
-                  <td className="whitespace-nowrap text-xs text-slate-500">
-                    {s.expireTime ? new Date(s.expireTime).toLocaleDateString() : "—"}
-                  </td>
+
+                  {/* 归属客户 */}
                   <td>
                     {s.assigned ? (
-                      <div className="text-xs">
-                        <div className="font-medium text-slate-700">{s.assignedCustomerName}</div>
+                      <div>
+                        <div className="text-sm font-medium text-slate-700">
+                          {s.assignedCustomerName}
+                        </div>
                         <button
-                          className="text-red-600 hover:underline"
+                          className="text-xs text-red-600 hover:underline"
                           onClick={() => unassign(s.ecsResourceUUID, s.assignedCustomerName)}
                         >
                           取消分配
@@ -202,10 +267,13 @@ export default function AdminServersPage() {
                       <span className="chip">未分配</span>
                     )}
                   </td>
+
+                  {/* 操作下拉 */}
                   <td>
                     <ServerActionButtons
                       uuid={s.ecsResourceUUID}
                       role="reseller_admin"
+                      variant="menu"
                       onDone={() => mutate()}
                     />
                   </td>

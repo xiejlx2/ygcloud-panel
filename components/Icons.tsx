@@ -140,6 +140,14 @@ export const IconSpinner = (p: IconProps) => (
   </svg>
 );
 
+export const IconDots = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="5" r="1.2" />
+    <circle cx="12" cy="12" r="1.2" />
+    <circle cx="12" cy="19" r="1.2" />
+  </svg>
+);
+
 export const IconShield = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6l-7-3Z" />
