@@ -1,7 +1,8 @@
 /**
  * GET /api/servers/:uuid/images
  *   查询该服务器所在地域的可用系统镜像（供重装系统选择）。
- *   代理商与客户均可调用；均需对该服务器有访问权限。
+ *   仅代理商主账号可调用：镜像列表只服务于重装系统，
+ *   重装权限已从最终客户收回，此接口一并收回以减少暴露面。
  */
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -16,6 +17,10 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
   try {
     const user = await getSession();
     if (!user) return err("UNAUTHORIZED", "未登录", 401);
+    // 与 reinstall 同步收权：客户侧无重装入口，镜像列表也不再开放
+    if (user.role !== "reseller_admin") {
+      return err("FORBIDDEN", "仅管理员可查询镜像列表", 403);
+    }
     await assertCanAccessServer(user, ctx.params.uuid);
 
     const resellerId =

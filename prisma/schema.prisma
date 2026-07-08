@@ -27,6 +27,8 @@ model User {
   displayName  String    @map("display_name")
   // active | disabled
   status       String    @default("active")
+  // 会话版本：签入 JWT，重置密码时 +1，使该用户所有旧会话立即失效
+  tokenVersion Int       @default(0) @map("token_version")
   remark       String?
   phone        String?
   email        String?

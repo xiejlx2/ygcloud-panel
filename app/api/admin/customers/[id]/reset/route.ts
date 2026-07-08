@@ -26,7 +26,8 @@ export async function POST(req: NextRequest, ctx: { params: { id: string } }) {
     const hash = await hashLoginPassword(parsed.data.password);
     await prisma.user.update({
       where: { id: ctx.params.id },
-      data: { passwordHash: hash },
+      // tokenVersion +1：让该客户所有已登录会话立即失效，必须用新密码重新登录
+      data: { passwordHash: hash, tokenVersion: { increment: 1 } },
     });
 
     await writeAudit({

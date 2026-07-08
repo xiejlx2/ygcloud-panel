@@ -19,6 +19,16 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return err("POWER_RATE_LIMIT", "操作过于频繁，请稍后再试", 429);
     }
 
+    // 可选请求体 { force: true } → 强制关机（等同断电，未落盘数据可能丢失）。
+    // 严格只认布尔 true，其余取值一律按普通关机处理。
+    let force = false;
+    try {
+      const body = (await req.json()) as { force?: unknown } | null;
+      force = body?.force === true;
+    } catch {
+      // 无请求体 / 非 JSON → 普通关机
+    }
+
     const resellerId =
       user.role === "reseller_admin" ? user.id : (user.parentId ?? "");
     const cache = await prisma.serverCache.findUnique({
@@ -33,6 +43,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const result = await stopInstance(resellerId, ctx.params.uuid, {
       regionCode: cache?.regionCode ?? undefined,
       zoneCode: cache?.zoneCode ?? undefined,
+      force,
     });
     const taskUuid =
       (result?.asyncTaskUUID as string | undefined) ??
@@ -42,7 +53,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     await writeAudit({
       user,
       ecsResourceUuid: ctx.params.uuid,
-      action: "stop",
+      action: force ? "force-stop" : "stop",
+      requestPayload: force ? { force: true } : undefined,
       asyncTaskUuid: taskUuid,
       taskStatus: "PENDING",
       requestIp: getRequestIp(req),

@@ -57,6 +57,9 @@ export function rateLimit(key: string, cfg: RateLimitConfig): boolean {
 // 预设的常用规则（对应方案 10.4）
 export const RL = {
   login: { capacity: 5, windowMs: 10 * 60 * 1000 }, // 5 次 / 10 分钟
+  // 取不到客户端 IP 时的全局兜底：容量放宽到 100 次 / 10 分钟。
+  // 只用于阻断无差别爆破，避免像单一 5 次桶那样被打满后全站无法登录。
+  loginGlobal: { capacity: 100, windowMs: 10 * 60 * 1000 },
   powerOp: { capacity: 1, windowMs: 30 * 1000 }, // 开/关/重启 1 次 / 30 秒
   modifyPwd: { capacity: 3, windowMs: 10 * 60 * 1000 }, // 改密码 3 次 / 10 分钟
   reinstall: { capacity: 1, windowMs: 5 * 60 * 1000 }, // 重装系统 1 次 / 5 分钟（破坏性，严格限流）

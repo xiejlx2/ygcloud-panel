@@ -12,8 +12,10 @@ interface Props {
   uuid: string;
   role?: "reseller_admin" | "customer";
   onDone?: () => void;
-  // 改密码 / 重装系统：默认对代理商与客户都开放
+  // 改密码：默认对代理商与客户都开放
   canModifyPassword?: boolean;
+  // 重装系统：仅代理商可用。客户角色下无论如何传参都强制隐藏
+  // （破坏性操作已从客户侧收权，后端同样硬拒绝）。
   canReinstall?: boolean;
   // menu：紧凑下拉（表格行用）；inline：平铺按钮（详情页用）
   variant?: "menu" | "inline";
@@ -38,15 +40,19 @@ function imageLabel(i: ImageItem): string {
   return i.osVersionDetail || i.imageName || i.imageResourceUUID;
 }
 
-type PendingAction = "start" | "stop" | "restart" | "password" | "reinstall" | null;
+type PowerAction = "start" | "stop" | "force-stop" | "restart";
+type PendingAction = PowerAction | "password" | "reinstall" | null;
 
 export function ServerActionButtons({
   uuid,
+  role,
   onDone,
   canModifyPassword = true,
   canReinstall = true,
   variant = "inline",
 }: Props) {
+  // 客户角色强制关闭重装入口，页面层传参无法覆盖
+  const reinstallAllowed = canReinstall && role !== "customer";
   const toast = useToast();
   const confirm = useConfirm();
   const [pending, setPending] = useState<PendingAction>(null);
@@ -64,10 +70,13 @@ export function ServerActionButtons({
   const [reAck, setReAck] = useState(false);
   const [reErr, setReErr] = useState<string | null>(null);
 
-  async function act(action: "start" | "stop" | "restart") {
+  async function act(action: PowerAction) {
     const ok = await confirm({
       title: `${label(action)}服务器`,
-      message: `确认对该服务器执行【${label(action)}】操作吗？`,
+      message:
+        action === "force-stop"
+          ? "强制关机等同于直接断电，未保存到磁盘的数据可能丢失。仅在普通关机无响应时使用。确认继续吗？"
+          : `确认对该服务器执行【${label(action)}】操作吗？`,
       confirmText: label(action),
       danger: action !== "start",
     });
@@ -75,9 +84,16 @@ export function ServerActionButtons({
     setPending(action);
     setTaskStatus("PENDING");
     try {
+      // 强制关机复用 stop 端点，body 携带 force 标记
+      const path = action === "force-stop" ? "stop" : action;
       const r = await api<{ asyncTaskUUID: string | null; status: string }>(
-        `/api/servers/${uuid}/${action}`,
-        { method: "POST" },
+        `/api/servers/${uuid}/${path}`,
+        {
+          method: "POST",
+          ...(action === "force-stop"
+            ? { body: JSON.stringify({ force: true }) }
+            : {}),
+        },
       );
       pollTask(r.asyncTaskUUID);
     } catch (e) {
@@ -190,7 +206,11 @@ export function ServerActionButtons({
     }
   }
 
-  const busy = pending === "start" || pending === "stop" || pending === "restart";
+  const busy =
+    pending === "start" ||
+    pending === "stop" ||
+    pending === "force-stop" ||
+    pending === "restart";
 
   const modals = (
     <>
@@ -343,7 +363,7 @@ export function ServerActionButtons({
         pending={pending}
         taskStatus={taskStatus}
         canModifyPassword={canModifyPassword}
-        canReinstall={canReinstall}
+        canReinstall={reinstallAllowed}
         onAct={act}
         onPassword={() => setPwdOpen(true)}
         onReinstall={openReinstall}
@@ -360,12 +380,20 @@ export function ServerActionButtons({
         <PowerBtn label="开机" active={pending === "start"} disabled={busy} onClick={() => act("start")} />
         <PowerBtn label="关机" active={pending === "stop"} disabled={busy} onClick={() => act("stop")} />
         <PowerBtn label="重启" active={pending === "restart"} disabled={busy} onClick={() => act("restart")} />
+        <button
+          className="btn-sm rounded-md px-2.5 py-1 font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={busy}
+          onClick={() => act("force-stop")}
+        >
+          {pending === "force-stop" && <IconSpinner className="h-3.5 w-3.5" />}
+          强制关机
+        </button>
         {canModifyPassword && (
           <button className="btn-ghost btn-sm" disabled={pending === "password"} onClick={() => setPwdOpen(true)}>
             改密码
           </button>
         )}
-        {canReinstall && (
+        {reinstallAllowed && (
           <button
             className="btn-sm rounded-md px-2.5 py-1 font-medium text-red-600 transition-colors hover:bg-red-50"
             disabled={pending === "reinstall"}
@@ -398,7 +426,7 @@ function ActionMenu({
   taskStatus: string | null;
   canModifyPassword: boolean;
   canReinstall: boolean;
-  onAct: (a: "start" | "stop" | "restart") => void;
+  onAct: (a: PowerAction) => void;
   onPassword: () => void;
   onReinstall: () => void;
   children: React.ReactNode;
@@ -433,7 +461,7 @@ function ActionMenu({
     if (open) return setOpen(false);
     const r = btnRef.current!.getBoundingClientRect();
     const W = 176;
-    const H = 220;
+    const H = 256;
     let left = r.right - W;
     let top = r.bottom + 6;
     if (top + H > window.innerHeight) top = r.top - H - 6;
@@ -468,6 +496,7 @@ function ActionMenu({
           <MenuItem disabled={busy} onClick={() => run(() => onAct("start"))}>开机</MenuItem>
           <MenuItem disabled={busy} onClick={() => run(() => onAct("stop"))}>关机</MenuItem>
           <MenuItem disabled={busy} onClick={() => run(() => onAct("restart"))}>重启</MenuItem>
+          <MenuItem danger disabled={busy} onClick={() => run(() => onAct("force-stop"))}>强制关机</MenuItem>
           {(canModifyPassword || canReinstall) && <div className="my-1 h-px bg-slate-100" />}
           {canModifyPassword && (
             <MenuItem onClick={() => run(onPassword)}>修改密码</MenuItem>
@@ -527,6 +556,15 @@ function PowerBtn({
   );
 }
 
-function label(action: "start" | "stop" | "restart") {
-  return action === "start" ? "开机" : action === "stop" ? "关机" : "重启";
+function label(action: PowerAction) {
+  switch (action) {
+    case "start":
+      return "开机";
+    case "stop":
+      return "关机";
+    case "force-stop":
+      return "强制关机";
+    case "restart":
+      return "重启";
+  }
 }

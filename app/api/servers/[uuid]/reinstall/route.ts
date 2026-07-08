@@ -1,7 +1,8 @@
 /**
  * POST /api/servers/:uuid/reinstall
  *   重装服务器操作系统（异步、破坏性）。
- *   - 代理商与客户均可执行（需对该服务器有访问权限）。
+ *   - 仅代理商主账号可执行：重装会清空全部数据，为防止客户误操作导致数据丢失，
+ *     该权限不下放给最终客户（客户如需重装，联系其代理商操作）。
  *   - 严格限流 1 次 / 5 分钟。
  *   - 强制密码强度校验（重装会重置 root/Administrator 密码）。
  *   - 上游要求服务器需先关机；未关机时由上游返回错误，前端透传。
@@ -29,6 +30,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   try {
     const user = await getSession();
     if (!user) return err("UNAUTHORIZED", "未登录", 401);
+    // 重装为破坏性操作，权限不下放给最终客户（防误操作清空数据）。
+    // 前端隐藏按钮不算权限控制，必须在此硬拒绝。
+    if (user.role !== "reseller_admin") {
+      return err("FORBIDDEN", "重装系统仅限管理员操作，如有需要请联系您的服务商", 403);
+    }
     await assertCanAccessServer(user, ctx.params.uuid);
 
     if (!rateLimit(`reinstall:${ctx.params.uuid}`, RL.reinstall)) {

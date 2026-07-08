@@ -15,6 +15,7 @@ import { assertIsResellerAdmin } from "@/lib/permissions";
 import {
   encryptToken,
   keyHint,
+  keyHintMatchesCurrent,
   tokenSuffix,
 } from "@/lib/crypto";
 import { listInstances } from "@/lib/cloud";
@@ -37,8 +38,9 @@ export async function GET() {
       status: row.status,
       tokenSuffix: row.tokenSuffix,
       lastVerifiedAt: row.lastVerifiedAt,
-      // 用于提示密钥变更导致无法解密
-      keyHint: row.tokenKeyHint,
+      // 密钥是否与写入时一致（比对在服务端完成，兼容旧格式 hint）。
+      // 不回传库中存储的 hint 原文 —— 旧格式 hint 是密钥前 8 位明文，不能出前端。
+      keyMatches: keyHintMatchesCurrent(row.tokenKeyHint),
       currentKeyHint: keyHint(),
     });
   } catch (e) {

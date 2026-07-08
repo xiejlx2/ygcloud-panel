@@ -15,9 +15,29 @@ function keyBuf(): Buffer {
   return Buffer.from(env.TOKEN_ENCRYPTION_KEY, "hex");
 }
 
-/** 返回当前密钥前 8 位 hex 作为 hint，便于诊断密钥变更导致的解密失败。 */
+/**
+ * 密钥指纹（hint）：SHA-256(密钥) 的前 8 位 hex。
+ * 用于诊断“密钥变更导致解密失败”，可安全展示给前端 ——
+ * 由单向哈希派生，不泄露密钥本身的任何字节。
+ */
 export function keyHint(): string {
-  return env.TOKEN_ENCRYPTION_KEY.slice(0, 8);
+  return crypto
+    .createHash("sha256")
+    .update(env.TOKEN_ENCRYPTION_KEY, "utf8")
+    .digest("hex")
+    .slice(0, 8);
+}
+
+/**
+ * 判断库中存储的 hint 是否对应当前密钥。
+ * 兼容旧格式：早期版本直接存密钥前 8 位明文，密钥未变时也应视为匹配；
+ * 该行的 hint 会在下次保存凭据时自动升级为新格式。
+ */
+export function keyHintMatchesCurrent(stored: string | null | undefined): boolean {
+  if (!stored) return true; // 无记录时不告警
+  if (stored === keyHint()) return true;
+  // 旧格式：密钥前 8 位 hex 明文
+  return stored === env.TOKEN_ENCRYPTION_KEY.slice(0, 8);
 }
 
 export function encryptToken(plain: string): string {

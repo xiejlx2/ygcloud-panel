@@ -15,7 +15,8 @@ interface TokenInfo {
   status?: string;
   tokenSuffix?: string;
   lastVerifiedAt?: string;
-  keyHint?: string;
+  // 服务端比对结果：库内凭据的加密密钥与当前密钥是否一致
+  keyMatches?: boolean;
   currentKeyHint?: string;
 }
 
@@ -77,8 +78,7 @@ export default function AdminTokenPage() {
     }
   }
 
-  const keyMismatch =
-    data?.keyHint && data?.currentKeyHint && data.keyHint !== data.currentKeyHint;
+  const keyMismatch = data?.configured && data.keyMatches === false;
 
   return (
     <div className="max-w-2xl space-y-5">
@@ -104,7 +104,7 @@ export default function AdminTokenPage() {
             )}
             {keyMismatch && (
               <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                ⚠ 加密密钥已变更（库内 hint={data.keyHint}，当前={data.currentKeyHint}），
+                ⚠ 服务端加密密钥已变更（当前密钥指纹 {data.currentKeyHint}），
                 原凭据无法解密，请重新填入。
               </div>
             )}

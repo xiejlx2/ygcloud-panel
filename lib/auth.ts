@@ -12,10 +12,14 @@ import type { SessionUser } from "@/lib/types";
 
 const COOKIE_NAME = "rp_session";
 
-export interface SessionPayload extends SessionUser {}
+export interface SessionPayload extends SessionUser {
+  // 会话版本：签发时取用户当前 tokenVersion，回查时必须与库中一致。
+  // 重置密码等操作将其 +1，即可让该用户所有已签发的旧令牌立即失效。
+  tv: number;
+}
 
-export function signSession(user: SessionUser): string {
-  return jwt.sign(user, env.JWT_SECRET, {
+export function signSession(user: SessionUser, tokenVersion: number): string {
+  return jwt.sign({ ...user, tv: tokenVersion }, env.JWT_SECRET, {
     expiresIn: `${env.JWT_EXPIRES_HOURS}h`,
     algorithm: "HS256",
   });
@@ -26,13 +30,16 @@ export function verifySession(token: string): SessionPayload | null {
     const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
     if (
       typeof payload.id === "string" &&
-      (payload.role === "reseller_admin" || payload.role === "customer")
+      (payload.role === "reseller_admin" || payload.role === "customer") &&
+      // 缺少 tv 的旧格式令牌一律视为无效（升级部署后需重新登录一次）
+      typeof payload.tv === "number"
     ) {
       return {
         id: payload.id,
         role: payload.role,
         parentId: payload.parentId ?? null,
         displayName: payload.displayName ?? "",
+        tv: payload.tv,
       };
     }
     return null;
@@ -41,7 +48,7 @@ export function verifySession(token: string): SessionPayload | null {
   }
 }
 
-export async function getSession(): Promise<SessionPayload | null> {
+export async function getSession(): Promise<SessionUser | null> {
   const store = cookies();
   const token = store.get(COOKIE_NAME)?.value;
   if (!token) return null;
@@ -52,13 +59,21 @@ export async function getSession(): Promise<SessionPayload | null> {
   // 让旧令牌立即失效。这里回查一次（主键索引，代价极小）：
   //  - 账号不存在 / 已禁用 → 会话失效
   //  - 角色与令牌不一致（被降权/改动）→ 会话失效
+  //  - tokenVersion 与令牌不一致（密码被重置等）→ 会话失效
   // 同时用库中最新的 parentId / displayName 覆盖令牌旧值。
   const u = await prisma.user.findUnique({
     where: { id: payload.id },
-    select: { status: true, role: true, parentId: true, displayName: true },
+    select: {
+      status: true,
+      role: true,
+      parentId: true,
+      displayName: true,
+      tokenVersion: true,
+    },
   });
   if (!u || u.status !== "active") return null;
   if (u.role !== payload.role) return null;
+  if (u.tokenVersion !== payload.tv) return null;
 
   return {
     id: payload.id,

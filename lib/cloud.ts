@@ -325,11 +325,15 @@ export async function startInstance(
 export async function stopInstance(
   resellerId: string,
   ecsResourceUUID: string,
-  opts?: { regionCode?: string; zoneCode?: string },
+  opts?: { regionCode?: string; zoneCode?: string; force?: boolean },
 ): Promise<{ asyncTaskUUID?: string; status?: string }> {
+  const body = buildInstanceActionBody(ecsResourceUUID, undefined, opts);
+  // 强制关机：上游 /instance/stop 的可选参数 forceStop。
+  // 仅在显式要求时才携带，普通关机不发送该字段。
+  if (opts?.force === true) body.forceStop = true;
   return cloudRequest(resellerId, "/instance/stop", {
     method: "POST",
-    body: buildInstanceActionBody(ecsResourceUUID, undefined, opts),
+    body,
   });
 }
 
