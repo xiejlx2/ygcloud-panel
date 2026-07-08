@@ -233,16 +233,29 @@ export async function listRegions(resellerId: string): Promise<RegionItem[]> {
   return arr.filter((r) => r && r.regionCode && Array.isArray(r.zones));
 }
 
+export interface InstanceListResult {
+  instances: InstanceListItem[];
+  /**
+   * 本轮是否完整覆盖了所有 (region, zone)。
+   * false 表示至少有一个可用区拉取失败——此时“某台机器不在返回结果里”
+   * 不能作为它已被销毁的依据（调用方据此决定是否执行清理类操作）。
+   */
+  complete: boolean;
+}
+
 /**
- * 拉取代理商名下所有服务器。
+ * 拉取代理商名下所有服务器（含完整性标记）。
  * 上游 /instance/list 要求必传 regionCode + zoneCode，所以必须先拉 region 列表，
  * 再按 (region, zone) 维度逐个拉取，合并去重。
  *
- * 单 zone 失败不阻断整体同步（某区域临时故障不应影响其他区域）。
+ * 单 zone 失败不阻断整体同步（某区域临时故障不应影响其他区域），
+ * 但会把 complete 置为 false。
  */
-export async function listInstances(resellerId: string): Promise<InstanceListItem[]> {
+export async function listInstancesDetailed(
+  resellerId: string,
+): Promise<InstanceListResult> {
   const regions = await listRegions(resellerId);
-  if (regions.length === 0) return [];
+  if (regions.length === 0) return { instances: [], complete: true };
 
   // 展开成 (region, zone) 任务列表
   const tasks: { region: string; zone: string }[] = [];
@@ -254,6 +267,7 @@ export async function listInstances(resellerId: string): Promise<InstanceListIte
 
   // 限制并发到 5，避免触发上游速率限制
   const CONCURRENCY = 5;
+  let complete = true;
   const results: InstanceListItem[][] = [];
   for (let i = 0; i < tasks.length; i += CONCURRENCY) {
     const batch = tasks.slice(i, i + CONCURRENCY);
@@ -269,7 +283,10 @@ export async function listInstances(resellerId: string): Promise<InstanceListIte
           },
         )
           .then((d) => d.instances ?? [])
-          .catch(() => [] as InstanceListItem[]),
+          .catch(() => {
+            complete = false;
+            return [] as InstanceListItem[];
+          }),
       ),
     );
     for (const arr of out) results.push(arr);
@@ -284,7 +301,13 @@ export async function listInstances(resellerId: string): Promise<InstanceListIte
     seen.add(it.ecsResourceUUID);
     merged.push(it);
   }
-  return merged;
+  return { instances: merged, complete };
+}
+
+/** 兼容旧调用方：仅返回实例列表。 */
+export async function listInstances(resellerId: string): Promise<InstanceListItem[]> {
+  const r = await listInstancesDetailed(resellerId);
+  return r.instances;
 }
 
 export async function getInstanceDetail(

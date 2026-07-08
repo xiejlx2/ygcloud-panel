@@ -4,11 +4,13 @@ import useSWR from "swr";
 import Link from "next/link";
 import { api } from "@/components/Api";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ExpiryBadge } from "@/components/ExpiryBadge";
 import { ServerActionButtons } from "@/components/ServerActionButtons";
 import { PageHeader } from "@/components/PageHeader";
 import { TableSkeleton } from "@/components/Skeleton";
 import { EmptyState } from "@/components/EmptyState";
-import { IconServer } from "@/components/Icons";
+import { IconServer, IconAlert } from "@/components/Icons";
+import { getExpiryInfo } from "@/lib/expiry";
 
 interface Server {
   ecsResourceUUID: string;
@@ -34,9 +36,35 @@ export default function ClientServersPage() {
   );
   const items = data?.items ?? [];
 
+  // 到期/回收站统计（回收站机器仍在列表中展示，销毁前可续费恢复）
+  const expiringCount = items.filter(
+    (s) => getExpiryInfo(s.expireTime).state === "expiring",
+  ).length;
+  const recycledCount = items.filter((s) => {
+    const st = getExpiryInfo(s.expireTime).state;
+    return st === "recycled" || st === "destroyed";
+  }).length;
+
   return (
     <div className="space-y-5">
       <PageHeader title="我的服务器" subtitle="管理分配给你的服务器" />
+
+      {(expiringCount > 0 || recycledCount > 0) && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <IconAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            {expiringCount > 0 && (
+              <>你有 <b>{expiringCount}</b> 台服务器将在 7 天内到期；</>
+            )}
+            {recycledCount > 0 && (
+              <>你有 <b>{recycledCount}</b> 台服务器已到期进入回收站，
+              到期超过 3 天将被<b>永久销毁且数据无法找回</b>；</>
+            )}
+            如需续费，请尽快联系为你开通账号的管理员。
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {(error as Error).message}
@@ -95,7 +123,10 @@ export default function ClientServersPage() {
                     </div>
                   </td>
                   <td>
-                    <StatusBadge value={s.ecsStatus} />
+                    <div className="flex flex-wrap items-center gap-1">
+                      <StatusBadge value={s.ecsStatus} />
+                      <ExpiryBadge expireTime={s.expireTime} />
+                    </div>
                     {s.expireTime && (
                       <div className="mt-1 text-xs text-slate-400">
                         到期 {new Date(s.expireTime).toLocaleDateString()}

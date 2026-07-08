@@ -106,9 +106,18 @@ async function refreshInBackground(
         data: {
           ecsStatus: it.ecsStatus ?? undefined,
           ecsPendingStatus: it.ecsPendingStatus ?? undefined,
+          // 到期时间一并刷新：续费后客户侧的到期/回收站提示能及时消除
+          expireTime: parseExpire(it.expireTime),
           lastSyncedAt: now,
         },
       })
       .catch(() => void 0);
   }
+}
+
+/** 无效/缺失的到期时间返回 undefined（保持库中原值不动）。 */
+function parseExpire(v?: string): Date | undefined {
+  if (!v) return undefined;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? undefined : d;
 }

@@ -15,7 +15,13 @@ import {
 } from "@/components/Icons";
 
 interface Dashboard {
-  servers: { total: number; assigned: number; unassigned: number };
+  servers: {
+    total: number;
+    assigned: number;
+    unassigned: number;
+    expiringSoon: number;
+    recycled: number;
+  };
   customers: number;
   token: {
     configured: boolean;
@@ -31,6 +37,8 @@ const STATS = [
   { key: "assigned", label: "已分配", icon: IconLink, color: "text-emerald-600 bg-emerald-50" },
   { key: "unassigned", label: "未分配", icon: IconServer, color: "text-amber-600 bg-amber-50" },
   { key: "customers", label: "客户数量", icon: IconUsers, color: "text-indigo-600 bg-indigo-50" },
+  { key: "expiringSoon", label: "7 天内到期", icon: IconAlert, color: "text-amber-600 bg-amber-50" },
+  { key: "recycled", label: "回收站", icon: IconAlert, color: "text-red-600 bg-red-50" },
 ] as const;
 
 export default function DashboardPage() {
@@ -45,8 +53,13 @@ export default function DashboardPage() {
         assigned: data.servers.assigned,
         unassigned: data.servers.unassigned,
         customers: data.customers,
+        expiringSoon: data.servers.expiringSoon,
+        recycled: data.servers.recycled,
       }
     : {};
+
+  const expiryAlert =
+    data && (data.servers.expiringSoon > 0 || data.servers.recycled > 0);
 
   return (
     <div className="space-y-6">
@@ -55,6 +68,26 @@ export default function DashboardPage() {
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {(error as Error).message}
+        </div>
+      )}
+
+      {expiryAlert && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <IconAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            {data!.servers.expiringSoon > 0 && (
+              <>有 <b>{data!.servers.expiringSoon}</b> 台服务器将在 7 天内到期；</>
+            )}
+            {data!.servers.recycled > 0 && (
+              <>有 <b>{data!.servers.recycled}</b> 台已到期进入回收站，
+              超过 3 天将被<b>永久销毁</b>；</>
+            )}
+            请尽快前往云平台续费，或在{" "}
+            <Link className="font-medium underline" href="/admin/servers">
+              服务器列表
+            </Link>{" "}
+            查看明细。
+          </div>
         </div>
       )}
 
@@ -72,7 +105,7 @@ export default function DashboardPage() {
       )}
 
       {/* 统计卡片 */}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
         {isLoading
           ? STATS.map((s) => <StatSkeleton key={s.key} />)
           : STATS.map((s) => {

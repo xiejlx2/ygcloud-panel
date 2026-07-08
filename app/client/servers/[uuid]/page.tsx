@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { api } from "@/components/Api";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ExpiryBadge } from "@/components/ExpiryBadge";
 import { ServerActionButtons } from "@/components/ServerActionButtons";
 import { Skeleton } from "@/components/Skeleton";
 
@@ -90,7 +91,16 @@ export default function ClientServerDetailPage() {
             <Field label="操作系统" value={data.osVersionDetail || data.osName} />
             <Field
               label="到期时间"
-              value={data.expireTime ? new Date(data.expireTime).toLocaleString() : null}
+              valueNode={
+                data.expireTime ? (
+                  <span className="inline-flex flex-wrap items-center gap-1.5">
+                    {new Date(data.expireTime).toLocaleString()}
+                    <ExpiryBadge expireTime={data.expireTime} />
+                  </span>
+                ) : (
+                  <span className="text-slate-400">—</span>
+                )
+              }
             />
             <Field
               label="最近同步"

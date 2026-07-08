@@ -7,7 +7,8 @@ import { NextRequest } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { assertIsResellerAdmin } from "@/lib/permissions";
-import { listInstances, type InstanceListItem } from "@/lib/cloud";
+import { listInstancesDetailed, type InstanceListItem } from "@/lib/cloud";
+import { getExpiryInfo } from "@/lib/expiry";
 import { ok, err, handleError, getRequestIp, getUserAgent } from "@/lib/api";
 import { rateLimit, RL } from "@/lib/ratelimit";
 import { writeAudit } from "@/lib/audit";
@@ -21,7 +22,7 @@ export async function POST(req: NextRequest) {
       return err("SYNC_RATE_LIMIT", "同步过于频繁，请 60 秒后再试", 429);
     }
 
-    const list = await listInstances(user.id);
+    const { instances: list, complete } = await listInstancesDetailed(user.id);
     if (!Array.isArray(list)) {
       return err("SYNC_PARSE_FAILED", "解析上游返回数据失败", 502);
     }
@@ -29,12 +30,15 @@ export async function POST(req: NextRequest) {
     const now = new Date();
     let upserted = 0;
     let total = list.length;
+    let purged: string[] = [];
 
     // 单个事务批量 upsert
     await prisma.$transaction(async (tx) => {
+      const seen = new Set<string>();
       for (const it of list) {
         const uuid = it.ecsResourceUUID;
         if (!uuid) continue;
+        seen.add(uuid);
         const payload = toCachePayload(it, now);
         await tx.serverCache.upsert({
           where: {
@@ -48,18 +52,56 @@ export async function POST(req: NextRequest) {
         });
         upserted++;
       }
+
+      // 清理“已销毁”的机器：已过预计销毁时间（到期 + 回收站 3 天，第 4 天 0 点）
+      // 且本轮上游已不再返回。仅在本轮拉取完整时执行——若有可用区拉取失败，
+      // “不在返回结果里”不能作为已销毁的依据，跳过清理等待下一轮。
+      if (complete) {
+        const cached = await tx.serverCache.findMany({
+          where: { resellerId: user.id },
+          select: { ecsResourceUuid: true, expireTime: true },
+        });
+        purged = cached
+          .filter(
+            (c) =>
+              !seen.has(c.ecsResourceUuid) &&
+              getExpiryInfo(c.expireTime, now).state === "destroyed",
+          )
+          .map((c) => c.ecsResourceUuid);
+        if (purged.length > 0) {
+          // 分配记录引用了 server_cache（FK Restrict），需一并删除；
+          // 操作历史保留在 operation_logs（无外键，按 uuid 记录），不受影响。
+          await tx.serverAssignment.deleteMany({
+            where: { resellerId: user.id, ecsResourceUuid: { in: purged } },
+          });
+          await tx.serverCache.deleteMany({
+            where: { resellerId: user.id, ecsResourceUuid: { in: purged } },
+          });
+        }
+      }
     });
+
+    if (purged.length > 0) {
+      await writeAudit({
+        user,
+        ecsResourceUuid: "-",
+        action: "purge_destroyed",
+        requestPayload: { count: purged.length, uuids: purged },
+        requestIp: getRequestIp(req),
+        userAgent: getUserAgent(req),
+      });
+    }
 
     await writeAudit({
       user,
       ecsResourceUuid: "-",
       action: "sync_server",
-      requestPayload: { total, upserted },
+      requestPayload: { total, upserted, purged: purged.length, complete },
       requestIp: getRequestIp(req),
       userAgent: getUserAgent(req),
     });
 
-    return ok({ total, upserted, syncedAt: now });
+    return ok({ total, upserted, purged: purged.length, syncedAt: now });
   } catch (e) {
     return handleError(e);
   }

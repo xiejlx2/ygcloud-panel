@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { api, ApiError } from "@/components/Api";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ExpiryBadge } from "@/components/ExpiryBadge";
 import { ServerActionButtons } from "@/components/ServerActionButtons";
 import { AssignDialog } from "@/components/AssignDialog";
 import { PageHeader } from "@/components/PageHeader";
@@ -241,7 +242,10 @@ export default function AdminServersPage() {
 
                   {/* 状态 + 到期 */}
                   <td>
-                    <StatusBadge value={s.ecsStatus} />
+                    <div className="flex flex-wrap items-center gap-1">
+                      <StatusBadge value={s.ecsStatus} />
+                      <ExpiryBadge expireTime={s.expireTime} />
+                    </div>
                     {s.expireTime && (
                       <div className="mt-1 text-xs text-slate-400">
                         到期 {new Date(s.expireTime).toLocaleDateString()}

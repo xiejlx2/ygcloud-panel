@@ -5,6 +5,7 @@
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
 import { assertIsResellerAdmin } from "@/lib/permissions";
+import { getExpiryInfo } from "@/lib/expiry";
 import { ok, handleError } from "@/lib/api";
 
 export async function GET() {
@@ -12,7 +13,7 @@ export async function GET() {
     const user = await getSession();
     assertIsResellerAdmin(user);
 
-    const [totalServers, assignedServers, customerCount, token, lastLog] =
+    const [totalServers, assignedServers, customerCount, token, lastLog, expireRows] =
       await Promise.all([
         prisma.serverCache.count({ where: { resellerId: user.id } }),
         prisma.serverAssignment.count({
@@ -40,7 +41,21 @@ export async function GET() {
             user: { select: { displayName: true } },
           },
         }),
+        prisma.serverCache.findMany({
+          where: { resellerId: user.id, expireTime: { not: null } },
+          select: { expireTime: true },
+        }),
       ]);
+
+    // 到期状态统计（回收站 3 天保留规则见 lib/expiry.ts）
+    const now = new Date();
+    let expiringSoon = 0;
+    let recycled = 0;
+    for (const r of expireRows) {
+      const st = getExpiryInfo(r.expireTime, now).state;
+      if (st === "expiring") expiringSoon++;
+      else if (st === "recycled" || st === "destroyed") recycled++;
+    }
 
     const recentLogs = lastLog
       ? [
@@ -58,6 +73,8 @@ export async function GET() {
         total: totalServers,
         assigned: assignedServers,
         unassigned: Math.max(0, totalServers - assignedServers),
+        expiringSoon,
+        recycled,
       },
       customers: customerCount,
       token: token
