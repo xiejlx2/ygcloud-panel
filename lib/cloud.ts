@@ -243,10 +243,51 @@ export interface InstanceListResult {
   complete: boolean;
 }
 
+// /instance/list 上游分页：pageSize 取值范围 1~50、默认仅 10。
+// 不传就只能拿到每个可用区的前 10 台，机器多的可用区会被静默截断（曾导致漏同步）。
+// 用上限 50 逐页翻，直到取满上游报告的 rowCount 或某页返回不足一页。
+const ZONE_PAGE_SIZE = 50;
+const ZONE_MAX_PAGES = 40; // 安全上限：单可用区最多 2000 台，防异常时无限翻页
+
+/**
+ * 拉取单个 (region, zone) 下的全部实例（翻页取全）。
+ * 任一页失败直接抛出，由调用方标记本轮不完整。
+ */
+async function fetchZoneInstances(
+  resellerId: string,
+  region: string,
+  zone: string,
+): Promise<InstanceListItem[]> {
+  const all: InstanceListItem[] = [];
+  for (let page = 1; page <= ZONE_MAX_PAGES; page++) {
+    const d = await cloudRequest<{ instances?: InstanceListItem[]; rowCount?: number }>(
+      resellerId,
+      "/instance/list",
+      {
+        method: "GET",
+        query: {
+          regionCode: region,
+          zoneCode: zone,
+          page,
+          pageSize: ZONE_PAGE_SIZE,
+        },
+        timeoutMs: 20000,
+      },
+    );
+    const arr = d.instances ?? [];
+    all.push(...arr);
+    // 本页不足一页 → 已是最后一页
+    if (arr.length < ZONE_PAGE_SIZE) break;
+    // 已取满上游报告的总数 → 提前结束
+    if (typeof d.rowCount === "number" && all.length >= d.rowCount) break;
+  }
+  return all;
+}
+
 /**
  * 拉取代理商名下所有服务器（含完整性标记）。
  * 上游 /instance/list 要求必传 regionCode + zoneCode，所以必须先拉 region 列表，
- * 再按 (region, zone) 维度逐个拉取，合并去重。
+ * 再按 (region, zone) 维度逐个翻页拉取，合并去重。
  *
  * 单 zone 失败不阻断整体同步（某区域临时故障不应影响其他区域），
  * 但会把 complete 置为 false。
@@ -273,20 +314,10 @@ export async function listInstancesDetailed(
     const batch = tasks.slice(i, i + CONCURRENCY);
     const out = await Promise.all(
       batch.map((t) =>
-        cloudRequest<{ instances?: InstanceListItem[] }>(
-          resellerId,
-          "/instance/list",
-          {
-            method: "GET",
-            query: { regionCode: t.region, zoneCode: t.zone },
-            timeoutMs: 20000,
-          },
-        )
-          .then((d) => d.instances ?? [])
-          .catch(() => {
-            complete = false;
-            return [] as InstanceListItem[];
-          }),
+        fetchZoneInstances(resellerId, t.region, t.zone).catch(() => {
+          complete = false;
+          return [] as InstanceListItem[];
+        }),
       ),
     );
     for (const arr of out) results.push(arr);
