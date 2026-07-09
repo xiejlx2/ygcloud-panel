@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { api } from "@/components/Api";
-import { StatusBadge, statusLabel } from "@/components/StatusBadge";
+import { StatusBadge, statusLabel, COMMON_ECS_STATUSES } from "@/components/StatusBadge";
 import { ExpiryBadge } from "@/components/ExpiryBadge";
 import {
   FilterHead,
@@ -45,9 +45,9 @@ export default function ClientServersPage() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [expireSort, setExpireSort] = useState<SortDir>(null);
 
-  // 状态筛选选项：由当前数据里实际出现的状态动态生成
+  // 状态筛选选项：常见状态常驻 + 数据里实际出现的状态（并集）
   const statusOptions = useMemo(() => {
-    const set = new Set<string>();
+    const set = new Set<string>(COMMON_ECS_STATUSES);
     for (const s of items) if (s.ecsStatus) set.add(s.ecsStatus);
     return Array.from(set).map((v) => ({ value: v, label: statusLabel(v) }));
   }, [items]);

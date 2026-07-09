@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { api, ApiError } from "@/components/Api";
-import { StatusBadge, statusLabel } from "@/components/StatusBadge";
+import { StatusBadge, statusLabel, COMMON_ECS_STATUSES } from "@/components/StatusBadge";
 import { ExpiryBadge } from "@/components/ExpiryBadge";
 import {
   FilterHead,
@@ -61,9 +61,10 @@ export default function AdminServersPage() {
 
   const items = useMemo(() => data?.items ?? [], [data]);
 
-  // 状态筛选选项：由当前数据里实际出现的状态动态生成
+  // 状态筛选选项：常见状态常驻 + 数据里实际出现的状态（并集）。
+  // 这样即使当前没有关机的机器，也能预先按“已关机”等状态筛选。
   const statusOptions = useMemo(() => {
-    const set = new Set<string>();
+    const set = new Set<string>(COMMON_ECS_STATUSES);
     for (const s of items) if (s.ecsStatus) set.add(s.ecsStatus);
     return Array.from(set).map((v) => ({ value: v, label: statusLabel(v) }));
   }, [items]);

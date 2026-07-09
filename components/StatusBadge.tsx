@@ -12,7 +12,8 @@ interface StatusStyle {
 const MAP: Record<string, StatusStyle> = {
   STARTED: { cls: "bg-emerald-50 text-emerald-700", dot: "bg-emerald-500", label: "运行中" },
   RUNNING: { cls: "bg-emerald-50 text-emerald-700", dot: "bg-emerald-500", label: "运行中" },
-  STOPPED: { cls: "bg-slate-100 text-slate-600", dot: "bg-slate-400", label: "已停止" },
+  STOPPED: { cls: "bg-slate-100 text-slate-600", dot: "bg-slate-400", label: "已关机" },
+  LOCKED: { cls: "bg-red-50 text-red-700", dot: "bg-red-500", label: "已锁定" },
   PENDING: { cls: "bg-amber-50 text-amber-700", dot: "bg-amber-500 animate-pulse", label: "处理中" },
   STARTING: { cls: "bg-amber-50 text-amber-700", dot: "bg-amber-500 animate-pulse", label: "开机中" },
   STOPPING: { cls: "bg-amber-50 text-amber-700", dot: "bg-amber-500 animate-pulse", label: "关机中" },
@@ -25,6 +26,14 @@ const MAP: Record<string, StatusStyle> = {
   invalid: { cls: "bg-red-50 text-red-700", dot: "bg-red-500", label: "无效" },
   revoked: { cls: "bg-slate-100 text-slate-600", dot: "bg-slate-400", label: "已撤销" },
 };
+
+/**
+ * 可作为筛选项常驻展示的常见实例状态（即使当前列表里没有该状态的机器）。
+ * 上游未提供正式状态枚举，这里取文档示例 + 命名惯例中的主状态：
+ *   STARTED 运行中 / STOPPED 已关机 / LOCKED 已锁定 / PENDING 处理中。
+ * 列表中出现的其它状态由页面按并集动态补入，故此处不必求全。
+ */
+export const COMMON_ECS_STATUSES = ["STARTED", "STOPPED", "LOCKED", "PENDING"];
 
 /** 状态值的中文展示名（无映射时原样返回），供筛选下拉等复用。 */
 export function statusLabel(value: string): string {
