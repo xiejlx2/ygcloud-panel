@@ -27,14 +27,6 @@ const MAP: Record<string, StatusStyle> = {
   revoked: { cls: "bg-slate-100 text-slate-600", dot: "bg-slate-400", label: "已撤销" },
 };
 
-/**
- * 可作为筛选项常驻展示的常见实例状态（即使当前列表里没有该状态的机器）。
- * 上游未提供正式状态枚举，这里取文档示例 + 命名惯例中的主状态：
- *   STARTED 运行中 / STOPPED 已关机 / LOCKED 已锁定 / PENDING 处理中。
- * 列表中出现的其它状态由页面按并集动态补入，故此处不必求全。
- */
-export const COMMON_ECS_STATUSES = ["STARTED", "STOPPED", "LOCKED", "PENDING"];
-
 /** 状态值的中文展示名（无映射时原样返回），供筛选下拉等复用。 */
 export function statusLabel(value: string): string {
   return MAP[value]?.label ?? value;
