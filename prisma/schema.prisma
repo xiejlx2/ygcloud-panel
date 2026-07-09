@@ -47,6 +47,8 @@ model User {
   logsAsUser          OperationLog[] @relation("LogUser")
   // 代理商拥有的服务器缓存
   serverCache         ServerCache[] @relation("ServerCacheOwner")
+  // 代理商已知地域表
+  knownZones          ResellerKnownZone[] @relation("KnownZoneOwner")
 
   @@index([parentId])
   @@map("users")
@@ -69,6 +71,31 @@ model ResellerApiToken {
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
   @@map("reseller_api_tokens")
+}
+
+// ===== 2.5 代理商“已知地域”表 =====
+// 记录该代理商曾经有过机器的 (地域, 可用区)。用途：
+//   上游 /region/list 只返回“当前在售”地域，已售罄下架的地域会消失，
+//   但其存量机器仍在运行、instance/list 仍可查。日常同步遍历
+//   “在售地域 ∪ 本表已知地域”，即可覆盖这类下架地域的机器（不再漏同步）。
+// 只由「更新地域库」按钮写入（只增不删），日常同步只读不写。
+model ResellerKnownZone {
+  id          String   @id @default(cuid())
+  resellerId  String   @map("reseller_id")
+  reseller    User     @relation("KnownZoneOwner", fields: [resellerId], references: [id], onDelete: Cascade)
+  regionCode  String   @map("region_code")
+  regionName  String?  @map("region_name")
+  zoneCode    String   @map("zone_code")
+  zoneName    String?  @map("zone_name")
+  // 上次「更新地域库」时观测到的机器数（诊断用）
+  machineCount Int     @default(0) @map("machine_count")
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([resellerId, regionCode, zoneCode])
+  @@index([resellerId])
+  @@map("reseller_known_zones")
 }
 
 // ===== 3. 服务器本地缓存（来自上游 /instance/list）=====

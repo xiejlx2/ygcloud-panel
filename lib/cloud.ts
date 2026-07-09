@@ -250,6 +250,27 @@ const ZONE_PAGE_SIZE = 50;
 const ZONE_MAX_PAGES = 40; // 安全上限：单可用区最多 2000 台，防异常时无限翻页
 
 /**
+ * 解析 EXTRA_SYNC_ZONES：手动补充的额外同步地域（已从上游 region/list 下架、
+ * 但仍有存量机器的地域，如售罄后的 sau-jeddah-1）。
+ *
+ * 格式：逗号分隔多个地域，每个为 "regionCode:zoneCode"；zoneCode 省略时默认
+ * 取 regionCode + "-a"。例：
+ *   EXTRA_SYNC_ZONES="sau-jeddah-1:sau-jeddah-1-a,om-muscat-1"
+ */
+function parseExtraZones(): { region: string; zone: string }[] {
+  const raw = process.env.EXTRA_SYNC_ZONES || "";
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((pair) => {
+      const [region, zone] = pair.split(":").map((x) => x.trim());
+      return { region, zone: zone || (region ? `${region}-a` : "") };
+    })
+    .filter((t) => t.region && t.zone);
+}
+
+/**
  * 拉取单个 (region, zone) 下的全部实例（翻页取全）。
  * 任一页失败直接抛出，由调用方标记本轮不完整。
  */
@@ -294,20 +315,41 @@ async function fetchZoneInstances(
  */
 export async function listInstancesDetailed(
   resellerId: string,
+  opts?: {
+    // 额外并入的“已知地域”（来自 reseller_known_zones 表）。用于覆盖已从
+    // region/list 下架、但仍有存量机器的地域（如售罄的 sau-jeddah-1）。
+    knownZones?: { region: string; zone: string }[];
+  },
 ): Promise<InstanceListResult> {
   const regions = await listRegions(resellerId);
-  if (regions.length === 0) return { instances: [], complete: true };
+  // 注意：不能因 region/list 为空就直接返回。已售罄下架的地域会从 region/list
+  // 消失，但其存量机器仍在运行、instance/list 仍可查到。这类地域靠“已知地域表”
+  // 和 EXTRA_SYNC_ZONES 兜底，因此即便 region/list 为空也要继续处理额外地域。
 
-  // 展开成 (region, zone) 任务列表
+  // 展开成 (region, zone) 任务列表，并去重合并三个来源：
+  //   ① region/list 当前在售地域
+  //   ② 调用方传入的已知地域（reseller_known_zones）
+  //   ③ EXTRA_SYNC_ZONES 环境变量兜底
   const tasks: { region: string; zone: string }[] = [];
+  const known = new Set<string>();
+  const addZone = (region: string, zone: string) => {
+    if (!region || !zone) return;
+    const key = `${region}|${zone}`;
+    if (known.has(key)) return;
+    known.add(key);
+    tasks.push({ region, zone });
+  };
   for (const r of regions) {
-    for (const z of r.zones) {
-      tasks.push({ region: r.regionCode, zone: z.zoneCode });
-    }
+    for (const z of r.zones) addZone(r.regionCode, z.zoneCode);
   }
+  for (const kz of opts?.knownZones ?? []) addZone(kz.region, kz.zone);
+  for (const ez of parseExtraZones()) addZone(ez.region, ez.zone);
 
-  // 限制并发到 5，避免触发上游速率限制
-  const CONCURRENCY = 5;
+  if (tasks.length === 0) return { instances: [], complete: true };
+
+  // 并发拉取：地域多（几十个）时并发过低会明显拖慢，过高会触发上游限流。
+  // 折中取 12——多数地域无机器、单次往返即返回，实测足够快且稳。
+  const CONCURRENCY = 12;
   let complete = true;
   const results: InstanceListItem[][] = [];
   for (let i = 0; i < tasks.length; i += CONCURRENCY) {
@@ -339,6 +381,41 @@ export async function listInstancesDetailed(
 export async function listInstances(resellerId: string): Promise<InstanceListItem[]> {
   const r = await listInstancesDetailed(resellerId);
   return r.instances;
+}
+
+export interface ZoneWithMachines {
+  regionCode: string;
+  regionName?: string;
+  zoneCode: string;
+  zoneName?: string;
+  machineCount: number;
+}
+
+/**
+ * 从实例列表按 (regionCode, zoneCode) 聚合出“有机器的地域”及其机器数。
+ * 供「更新地域库」把有机器的地域写入 reseller_known_zones。
+ */
+export function zonesFromInstances(instances: InstanceListItem[]): ZoneWithMachines[] {
+  const map = new Map<string, ZoneWithMachines>();
+  for (const it of instances) {
+    const regionCode = it.regionCode;
+    const zoneCode = it.zoneCode;
+    if (!regionCode || !zoneCode) continue;
+    const key = `${regionCode}|${zoneCode}`;
+    const cur = map.get(key);
+    if (cur) {
+      cur.machineCount++;
+    } else {
+      map.set(key, {
+        regionCode,
+        regionName: it.regionName,
+        zoneCode,
+        zoneName: it.zoneName,
+        machineCount: 1,
+      });
+    }
+  }
+  return Array.from(map.values());
 }
 
 export async function getInstanceDetail(

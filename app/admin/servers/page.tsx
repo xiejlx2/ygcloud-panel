@@ -55,6 +55,7 @@ export default function AdminServersPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [assignOpen, setAssignOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [refreshingZones, setRefreshingZones] = useState(false);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [expireSort, setExpireSort] = useState<SortDir>(null);
@@ -121,6 +122,34 @@ export default function AdminServersPage() {
     }
   }
 
+  async function refreshZones() {
+    const ok = await confirm({
+      title: "更新地域库",
+      message:
+        "将扫描当前 Token 可访问的全部地域，把有机器的地域记入地域库（含已售罄下架、" +
+        "但仍有存量机器的地域），并做一次全量同步。请先确认该 Token 已开放全部地域权限，" +
+        "否则可能漏记地域。此操作较慢，请耐心等待。",
+      confirmText: "开始更新",
+    });
+    if (!ok) return;
+    setRefreshingZones(true);
+    try {
+      const r = await api<{
+        zonesTotal: number;
+        zonesAdded: number;
+        machines: number;
+      }>("/api/admin/zones/refresh", { method: "POST" });
+      toast.success(
+        `地域库已更新：覆盖 ${r.zonesTotal} 个地域（新增 ${r.zonesAdded}），共 ${r.machines} 台机器`,
+      );
+      mutate();
+    } catch (e) {
+      toast.error((e as ApiError).message || "更新地域库失败");
+    } finally {
+      setRefreshingZones(false);
+    }
+  }
+
   async function unassign(uuid: string, name: string | null) {
     const ok = await confirm({
       title: "取消分配",
@@ -148,10 +177,29 @@ export default function AdminServersPage() {
         title="服务器"
         subtitle="同步、查看并把服务器分配给客户"
         actions={
-          <button className="btn-default" disabled={syncing} onClick={sync}>
-            {syncing ? <IconSpinner className="h-4 w-4" /> : <IconRefresh className="h-4 w-4" />}
-            {syncing ? "同步中…" : "同步服务器"}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className="btn-default"
+              disabled={refreshingZones || syncing}
+              onClick={refreshZones}
+              title="扫描全部地域并把有机器的地域记入地域库（应对售罄下架地域）"
+            >
+              {refreshingZones ? (
+                <IconSpinner className="h-4 w-4" />
+              ) : (
+                <IconRefresh className="h-4 w-4" />
+              )}
+              {refreshingZones ? "更新中…" : "更新地域库"}
+            </button>
+            <button
+              className="btn-primary"
+              disabled={syncing || refreshingZones}
+              onClick={sync}
+            >
+              {syncing ? <IconSpinner className="h-4 w-4" /> : <IconRefresh className="h-4 w-4" />}
+              {syncing ? "同步中…" : "同步服务器"}
+            </button>
+          </div>
         }
       />
 
