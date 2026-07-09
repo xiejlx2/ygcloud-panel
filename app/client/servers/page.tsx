@@ -1,10 +1,17 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { api } from "@/components/Api";
-import { StatusBadge } from "@/components/StatusBadge";
+import { StatusBadge, statusLabel } from "@/components/StatusBadge";
 import { ExpiryBadge } from "@/components/ExpiryBadge";
+import {
+  FilterHead,
+  SortHead,
+  nextSortDir,
+  type SortDir,
+} from "@/components/TableHead";
 import { ServerActionButtons } from "@/components/ServerActionButtons";
 import { PageHeader } from "@/components/PageHeader";
 import { TableSkeleton } from "@/components/Skeleton";
@@ -26,7 +33,7 @@ interface Server {
   lastSyncedAt: string | null;
 }
 
-const COLS = 4;
+const COLS = 5;
 
 export default function ClientServersPage() {
   const { data, error, isLoading, mutate } = useSWR<{ items: Server[] }>(
@@ -34,7 +41,34 @@ export default function ClientServersPage() {
     api,
     { refreshInterval: 15_000 }, // 后台静默刷新状态
   );
-  const items = data?.items ?? [];
+  const items = useMemo(() => data?.items ?? [], [data]);
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [expireSort, setExpireSort] = useState<SortDir>(null);
+
+  // 状态筛选选项：由当前数据里实际出现的状态动态生成
+  const statusOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of items) if (s.ecsStatus) set.add(s.ecsStatus);
+    return Array.from(set).map((v) => ({ value: v, label: statusLabel(v) }));
+  }, [items]);
+
+  const shown = useMemo(() => {
+    let list = items;
+    if (statusFilter !== null) {
+      list = list.filter((s) => s.ecsStatus === statusFilter);
+    }
+    if (expireSort) {
+      list = [...list].sort((a, b) => {
+        const ta = a.expireTime ? new Date(a.expireTime).getTime() : null;
+        const tb = b.expireTime ? new Date(b.expireTime).getTime() : null;
+        if (ta === null && tb === null) return 0;
+        if (ta === null) return 1;
+        if (tb === null) return -1;
+        return expireSort === "asc" ? ta - tb : tb - ta;
+      });
+    }
+    return list;
+  }, [items, statusFilter, expireSort]);
 
   // 到期/回收站统计（回收站机器仍在列表中展示，销毁前可续费恢复）
   const expiringCount = items.filter(
@@ -78,24 +112,42 @@ export default function ClientServersPage() {
               <tr>
                 <th>服务器</th>
                 <th>配置</th>
-                <th>状态</th>
+                <th>
+                  <FilterHead
+                    label="状态"
+                    value={statusFilter}
+                    options={statusOptions}
+                    onChange={setStatusFilter}
+                  />
+                </th>
+                <th>
+                  <SortHead
+                    label="到期时间"
+                    dir={expireSort}
+                    onToggle={() => setExpireSort(nextSortDir(expireSort))}
+                  />
+                </th>
                 <th className="text-right">操作</th>
               </tr>
             </thead>
             <tbody>
               {isLoading && <TableSkeleton cols={COLS} rows={4} />}
-              {!isLoading && items.length === 0 && (
+              {!isLoading && shown.length === 0 && (
                 <tr>
                   <td colSpan={COLS}>
                     <EmptyState
                       icon={<IconServer />}
-                      title="暂无已分配的服务器"
-                      description="如有疑问，请联系为你开通账号的管理员。"
+                      title={statusFilter !== null ? "没有匹配的服务器" : "暂无已分配的服务器"}
+                      description={
+                        statusFilter !== null
+                          ? "换个筛选条件试试。"
+                          : "如有疑问，请联系为你开通账号的管理员。"
+                      }
                     />
                   </td>
                 </tr>
               )}
-              {items.map((s) => (
+              {shown.map((s) => (
                 <tr key={s.ecsResourceUUID}>
                   <td>
                     <Link
@@ -123,15 +175,17 @@ export default function ClientServersPage() {
                     </div>
                   </td>
                   <td>
-                    <div className="flex flex-wrap items-center gap-1">
-                      <StatusBadge value={s.ecsStatus} />
+                    <StatusBadge value={s.ecsStatus} />
+                  </td>
+                  <td>
+                    <div className="text-sm text-slate-700">
+                      {s.expireTime
+                        ? new Date(s.expireTime).toLocaleDateString()
+                        : <span className="text-slate-400">—</span>}
+                    </div>
+                    <div className="mt-1">
                       <ExpiryBadge expireTime={s.expireTime} />
                     </div>
-                    {s.expireTime && (
-                      <div className="mt-1 text-xs text-slate-400">
-                        到期 {new Date(s.expireTime).toLocaleDateString()}
-                      </div>
-                    )}
                   </td>
                   <td>
                     <ServerActionButtons

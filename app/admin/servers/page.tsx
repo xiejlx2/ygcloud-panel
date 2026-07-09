@@ -3,8 +3,14 @@
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { api, ApiError } from "@/components/Api";
-import { StatusBadge } from "@/components/StatusBadge";
+import { StatusBadge, statusLabel } from "@/components/StatusBadge";
 import { ExpiryBadge } from "@/components/ExpiryBadge";
+import {
+  FilterHead,
+  SortHead,
+  nextSortDir,
+  type SortDir,
+} from "@/components/TableHead";
 import { ServerActionButtons } from "@/components/ServerActionButtons";
 import { AssignDialog } from "@/components/AssignDialog";
 import { PageHeader } from "@/components/PageHeader";
@@ -37,7 +43,7 @@ interface Server {
   assignedCustomerName: string | null;
 }
 
-const COLS = 6;
+const COLS = 7;
 
 export default function AdminServersPage() {
   const toast = useToast();
@@ -50,17 +56,44 @@ export default function AdminServersPage() {
   const [assignOpen, setAssignOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [expireSort, setExpireSort] = useState<SortDir>(null);
 
   const items = useMemo(() => data?.items ?? [], [data]);
+
+  // 状态筛选选项：由当前数据里实际出现的状态动态生成
+  const statusOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of items) if (s.ecsStatus) set.add(s.ecsStatus);
+    return Array.from(set).map((v) => ({ value: v, label: statusLabel(v) }));
+  }, [items]);
+
   const filtered = useMemo(() => {
     const kw = q.trim().toLowerCase();
-    if (!kw) return items;
-    return items.filter((s) =>
-      [s.instanceName, s.publicIpAddress, s.ecsResourceUUID, s.regionName, s.assignedCustomerName]
-        .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(kw)),
-    );
-  }, [items, q]);
+    let list = items;
+    if (kw) {
+      list = list.filter((s) =>
+        [s.instanceName, s.publicIpAddress, s.ecsResourceUUID, s.regionName, s.assignedCustomerName]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(kw)),
+      );
+    }
+    if (statusFilter !== null) {
+      list = list.filter((s) => s.ecsStatus === statusFilter);
+    }
+    if (expireSort) {
+      list = [...list].sort((a, b) => {
+        // 无到期时间的始终排在最后
+        const ta = a.expireTime ? new Date(a.expireTime).getTime() : null;
+        const tb = b.expireTime ? new Date(b.expireTime).getTime() : null;
+        if (ta === null && tb === null) return 0;
+        if (ta === null) return 1;
+        if (tb === null) return -1;
+        return expireSort === "asc" ? ta - tb : tb - ta;
+      });
+    }
+    return list;
+  }, [items, q, statusFilter, expireSort]);
 
   function toggle(uuid: string) {
     setSelected((prev) => {
@@ -133,7 +166,8 @@ export default function AdminServersPage() {
           />
         </div>
         <span className="text-sm text-slate-400">
-          共 {items.length} 台{q && `，匹配 ${filtered.length} 台`}
+          共 {items.length} 台
+          {(q || statusFilter !== null) && `，匹配 ${filtered.length} 台`}
         </span>
       </div>
 
@@ -185,7 +219,21 @@ export default function AdminServersPage() {
                 </th>
                 <th>服务器</th>
                 <th>配置</th>
-                <th>状态</th>
+                <th>
+                  <FilterHead
+                    label="状态"
+                    value={statusFilter}
+                    options={statusOptions}
+                    onChange={setStatusFilter}
+                  />
+                </th>
+                <th>
+                  <SortHead
+                    label="到期时间"
+                    dir={expireSort}
+                    onToggle={() => setExpireSort(nextSortDir(expireSort))}
+                  />
+                </th>
                 <th>归属客户</th>
                 <th className="text-right">操作</th>
               </tr>
@@ -197,9 +245,11 @@ export default function AdminServersPage() {
                   <td colSpan={COLS}>
                     <EmptyState
                       icon={<IconServer />}
-                      title={q ? "没有匹配的服务器" : "暂无服务器"}
+                      title={q || statusFilter !== null ? "没有匹配的服务器" : "暂无服务器"}
                       description={
-                        q ? "换个关键词试试。" : "点击右上角「同步服务器」拉取云端资源。"
+                        q || statusFilter !== null
+                          ? "换个关键词或筛选条件试试。"
+                          : "点击右上角「同步服务器」拉取云端资源。"
                       }
                     />
                   </td>
@@ -240,17 +290,21 @@ export default function AdminServersPage() {
                     </div>
                   </td>
 
-                  {/* 状态 + 到期 */}
+                  {/* 状态 */}
                   <td>
-                    <div className="flex flex-wrap items-center gap-1">
-                      <StatusBadge value={s.ecsStatus} />
+                    <StatusBadge value={s.ecsStatus} />
+                  </td>
+
+                  {/* 到期时间 */}
+                  <td>
+                    <div className="text-sm text-slate-700">
+                      {s.expireTime
+                        ? new Date(s.expireTime).toLocaleDateString()
+                        : <span className="text-slate-400">—</span>}
+                    </div>
+                    <div className="mt-1">
                       <ExpiryBadge expireTime={s.expireTime} />
                     </div>
-                    {s.expireTime && (
-                      <div className="mt-1 text-xs text-slate-400">
-                        到期 {new Date(s.expireTime).toLocaleDateString()}
-                      </div>
-                    )}
                   </td>
 
                   {/* 归属客户 */}

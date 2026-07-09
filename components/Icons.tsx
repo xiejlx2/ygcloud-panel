@@ -148,6 +148,13 @@ export const IconDots = (p: IconProps) => (
   </svg>
 );
 
+export const IconSort = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="m8 9 4-4 4 4" />
+    <path d="m8 15 4 4 4-4" />
+  </svg>
+);
+
 export const IconShield = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6l-7-3Z" />

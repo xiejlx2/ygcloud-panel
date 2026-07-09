@@ -26,6 +26,11 @@ const MAP: Record<string, StatusStyle> = {
   revoked: { cls: "bg-slate-100 text-slate-600", dot: "bg-slate-400", label: "已撤销" },
 };
 
+/** 状态值的中文展示名（无映射时原样返回），供筛选下拉等复用。 */
+export function statusLabel(value: string): string {
+  return MAP[value]?.label ?? value;
+}
+
 export function StatusBadge({ value }: { value?: string | null }) {
   if (!value) return <span className="text-slate-400">—</span>;
   const s = MAP[value] ?? { cls: "bg-slate-100 text-slate-600", dot: "bg-slate-400" };
