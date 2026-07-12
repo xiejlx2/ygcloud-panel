@@ -33,12 +33,12 @@ interface Dashboard {
 }
 
 const STATS = [
-  { key: "total", label: "服务器总数", icon: IconServer, color: "text-brand bg-brand-50" },
-  { key: "assigned", label: "已分配", icon: IconLink, color: "text-emerald-600 bg-emerald-50" },
-  { key: "unassigned", label: "未分配", icon: IconServer, color: "text-amber-600 bg-amber-50" },
-  { key: "customers", label: "客户数量", icon: IconUsers, color: "text-indigo-600 bg-indigo-50" },
-  { key: "expiringSoon", label: "7 天内到期", icon: IconAlert, color: "text-amber-600 bg-amber-50" },
-  { key: "recycled", label: "回收站", icon: IconAlert, color: "text-red-600 bg-red-50" },
+  { key: "total", label: "服务器总数", icon: IconServer, color: "text-brand bg-brand-50", href: "/admin/servers" },
+  { key: "assigned", label: "已分配", icon: IconLink, color: "text-emerald-600 bg-emerald-50", href: null },
+  { key: "unassigned", label: "未分配", icon: IconServer, color: "text-amber-600 bg-amber-50", href: null },
+  { key: "customers", label: "客户数量", icon: IconUsers, color: "text-indigo-600 bg-indigo-50", href: "/admin/customers" },
+  { key: "expiringSoon", label: "7 天内到期", icon: IconAlert, color: "text-amber-600 bg-amber-50", href: "/admin/servers?expiry=expiring" },
+  { key: "recycled", label: "回收站", icon: IconAlert, color: "text-red-600 bg-red-50", href: "/admin/servers?expiry=recycled" },
 ] as const;
 
 export default function DashboardPage() {
@@ -110,8 +110,8 @@ export default function DashboardPage() {
           ? STATS.map((s) => <StatSkeleton key={s.key} />)
           : STATS.map((s) => {
               const Icon = s.icon;
-              return (
-                <div key={s.key} className="card p-4">
+              const inner = (
+                <>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-slate-500">{s.label}</span>
                     <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${s.color}`}>
@@ -121,6 +121,21 @@ export default function DashboardPage() {
                   <div className="mt-2 text-2xl font-semibold text-slate-900">
                     {values[s.key] ?? 0}
                   </div>
+                </>
+              );
+              // 有跳转目标的卡片整卡可点（如 回收站 → 服务器列表按回收站筛选）
+              return s.href ? (
+                <Link
+                  key={s.key}
+                  href={s.href}
+                  className="card p-4 transition-shadow hover:shadow-md"
+                  title="点击查看明细"
+                >
+                  {inner}
+                </Link>
+              ) : (
+                <div key={s.key} className="card p-4">
+                  {inner}
                 </div>
               );
             })}

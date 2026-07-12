@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import { api, ApiError } from "@/components/Api";
 import { StatusBadge, statusLabel } from "@/components/StatusBadge";
 import { ExpiryBadge } from "@/components/ExpiryBadge";
+import { getExpiryInfo } from "@/lib/expiry";
 import {
   FilterHead,
   SortHead,
@@ -45,6 +46,15 @@ interface Server {
 
 const COLS = 7;
 
+// 到期状态快捷筛选：expiring=7天内到期；recycled=回收站（含已过销毁时间待清理的）
+type ExpiryFilter = "expiring" | "recycled" | null;
+
+function matchExpiry(expireTime: string | null, f: Exclude<ExpiryFilter, null>): boolean {
+  const st = getExpiryInfo(expireTime).state;
+  if (f === "expiring") return st === "expiring";
+  return st === "recycled" || st === "destroyed";
+}
+
 export default function AdminServersPage() {
   const toast = useToast();
   const confirm = useConfirm();
@@ -59,8 +69,26 @@ export default function AdminServersPage() {
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [expireSort, setExpireSort] = useState<SortDir>(null);
+  const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>(null);
+
+  // 支持从概览页统计卡跳转：/admin/servers?expiry=expiring|recycled
+  useEffect(() => {
+    const v = new URLSearchParams(window.location.search).get("expiry");
+    if (v === "expiring" || v === "recycled") setExpiryFilter(v);
+  }, []);
 
   const items = useMemo(() => data?.items ?? [], [data]);
+
+  // 到期状态计数（用于快捷筛选 chip 上的数字）
+  const expiryCounts = useMemo(() => {
+    let expiring = 0;
+    let recycled = 0;
+    for (const s of items) {
+      if (matchExpiry(s.expireTime, "expiring")) expiring++;
+      else if (matchExpiry(s.expireTime, "recycled")) recycled++;
+    }
+    return { expiring, recycled };
+  }, [items]);
 
   // 状态筛选选项：由当前数据里实际出现的状态动态生成。
   // “选项 ⟺ 有该状态的机器”，不会出现点了却是空结果的死选项。
@@ -83,6 +111,9 @@ export default function AdminServersPage() {
     if (statusFilter !== null) {
       list = list.filter((s) => s.ecsStatus === statusFilter);
     }
+    if (expiryFilter !== null) {
+      list = list.filter((s) => matchExpiry(s.expireTime, expiryFilter));
+    }
     if (expireSort) {
       list = [...list].sort((a, b) => {
         // 无到期时间的始终排在最后
@@ -95,7 +126,7 @@ export default function AdminServersPage() {
       });
     }
     return list;
-  }, [items, q, statusFilter, expireSort]);
+  }, [items, q, statusFilter, expiryFilter, expireSort]);
 
   function toggle(uuid: string) {
     setSelected((prev) => {
@@ -214,9 +245,36 @@ export default function AdminServersPage() {
             onChange={(e) => setQ(e.target.value)}
           />
         </div>
+        {/* 到期状态快捷筛选：有命中才显示对应 chip，点击切换 */}
+        {expiryCounts.expiring > 0 && (
+          <button
+            className={`badge cursor-pointer transition-colors ${
+              expiryFilter === "expiring"
+                ? "bg-amber-500 text-white"
+                : "bg-amber-50 text-amber-700 hover:bg-amber-100"
+            }`}
+            onClick={() => setExpiryFilter(expiryFilter === "expiring" ? null : "expiring")}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${expiryFilter === "expiring" ? "bg-white" : "bg-amber-500"}`} />
+            7 天内到期 {expiryCounts.expiring}
+          </button>
+        )}
+        {expiryCounts.recycled > 0 && (
+          <button
+            className={`badge cursor-pointer transition-colors ${
+              expiryFilter === "recycled"
+                ? "bg-red-500 text-white"
+                : "bg-red-50 text-red-700 hover:bg-red-100"
+            }`}
+            onClick={() => setExpiryFilter(expiryFilter === "recycled" ? null : "recycled")}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${expiryFilter === "recycled" ? "bg-white" : "bg-red-500 animate-pulse"}`} />
+            回收站 {expiryCounts.recycled}
+          </button>
+        )}
         <span className="text-sm text-slate-400">
           共 {items.length} 台
-          {(q || statusFilter !== null) && `，匹配 ${filtered.length} 台`}
+          {(q || statusFilter !== null || expiryFilter !== null) && `，匹配 ${filtered.length} 台`}
         </span>
       </div>
 
@@ -294,9 +352,9 @@ export default function AdminServersPage() {
                   <td colSpan={COLS}>
                     <EmptyState
                       icon={<IconServer />}
-                      title={q || statusFilter !== null ? "没有匹配的服务器" : "暂无服务器"}
+                      title={q || statusFilter !== null || expiryFilter !== null ? "没有匹配的服务器" : "暂无服务器"}
                       description={
-                        q || statusFilter !== null
+                        q || statusFilter !== null || expiryFilter !== null
                           ? "换个关键词或筛选条件试试。"
                           : "点击右上角「同步服务器」拉取云端资源。"
                       }
