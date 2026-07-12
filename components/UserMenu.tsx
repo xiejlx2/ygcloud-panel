@@ -1,11 +1,13 @@
 "use client";
 
-/** 右上角用户菜单：显示名首字母头像 + 下拉（角色 / 退出）。 */
+/** 右上角用户菜单：显示名首字母头像 + 下拉（角色 / 修改密码 / 退出）。 */
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
-import { api } from "@/components/Api";
-import { IconChevronDown, IconLogout } from "@/components/Icons";
+import { api, ApiError } from "@/components/Api";
+import { Modal } from "@/components/Modal";
+import { useToast } from "@/components/Toast";
+import { IconChevronDown, IconLogout, IconKey, IconSpinner } from "@/components/Icons";
 
 interface Me {
   id: string;
@@ -15,9 +17,17 @@ interface Me {
 
 export function UserMenu() {
   const router = useRouter();
+  const toast = useToast();
   const { data } = useSWR<Me>("/api/auth/me", api);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  const [pwdOpen, setPwdOpen] = useState(false);
+  const [oldPwd, setOldPwd] = useState("");
+  const [newPwd, setNewPwd] = useState("");
+  const [newPwd2, setNewPwd2] = useState("");
+  const [pwdErr, setPwdErr] = useState<string | null>(null);
+  const [changing, setChanging] = useState(false);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -30,6 +40,36 @@ export function UserMenu() {
   async function logout() {
     await api("/api/auth/logout", { method: "POST" }).catch(() => void 0);
     router.replace("/login");
+  }
+
+  function openPwd() {
+    setOpen(false);
+    setOldPwd("");
+    setNewPwd("");
+    setNewPwd2("");
+    setPwdErr(null);
+    setPwdOpen(true);
+  }
+
+  async function submitPwd() {
+    setPwdErr(null);
+    if (newPwd !== newPwd2) {
+      setPwdErr("两次输入的新密码不一致");
+      return;
+    }
+    setChanging(true);
+    try {
+      await api("/api/auth/password", {
+        method: "POST",
+        body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd }),
+      });
+      setPwdOpen(false);
+      toast.success("密码已修改，其他设备的登录已全部失效");
+    } catch (e) {
+      setPwdErr((e as ApiError).message || "修改失败");
+    } finally {
+      setChanging(false);
+    }
   }
 
   const name = data?.name || "…";
@@ -60,6 +100,13 @@ export function UserMenu() {
             )}
           </div>
           <button
+            className="flex w-full items-center gap-2 px-3.5 py-2.5 text-sm text-slate-600 transition-colors hover:bg-slate-50"
+            onClick={openPwd}
+          >
+            <IconKey className="h-4 w-4" />
+            修改密码
+          </button>
+          <button
             className="flex w-full items-center gap-2 px-3.5 py-2.5 text-sm text-slate-600 transition-colors hover:bg-slate-50 hover:text-red-600"
             onClick={logout}
           >
@@ -68,6 +115,61 @@ export function UserMenu() {
           </button>
         </div>
       )}
+
+      {/* 修改登录密码 */}
+      <Modal
+        open={pwdOpen}
+        onClose={() => setPwdOpen(false)}
+        title="修改登录密码"
+        footer={
+          <>
+            <button className="btn-default" onClick={() => setPwdOpen(false)}>取消</button>
+            <button
+              className="btn-primary"
+              disabled={changing || !oldPwd || !newPwd || !newPwd2}
+              onClick={submitPwd}
+            >
+              {changing && <IconSpinner className="h-4 w-4" />}
+              确认修改
+            </button>
+          </>
+        }
+      >
+        <label className="label">旧密码</label>
+        <input
+          type="password"
+          className="input"
+          value={oldPwd}
+          onChange={(e) => setOldPwd(e.target.value)}
+          autoComplete="current-password"
+          autoFocus
+        />
+        <label className="label mt-3">新密码</label>
+        <input
+          type="password"
+          className="input"
+          placeholder="8-64 位，须含大小写字母和数字"
+          value={newPwd}
+          onChange={(e) => setNewPwd(e.target.value)}
+          autoComplete="new-password"
+        />
+        <label className="label mt-3">确认新密码</label>
+        <input
+          type="password"
+          className="input"
+          value={newPwd2}
+          onChange={(e) => setNewPwd2(e.target.value)}
+          autoComplete="new-password"
+        />
+        <p className="mt-2 text-xs text-slate-400">
+          修改成功后，其他设备/浏览器上的登录会全部失效，本设备无需重新登录。
+        </p>
+        {pwdErr && (
+          <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            {pwdErr}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

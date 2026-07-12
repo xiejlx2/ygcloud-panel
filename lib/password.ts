@@ -17,6 +17,22 @@ export async function verifyLoginPassword(
   return bcrypt.compare(plain, hash);
 }
 
+/**
+ * 面板登录密码校验（自助改密码用）：
+ * 长度 8-64、须含大小写字母与数字（特殊字符可选，比服务器系统密码宽松），禁止常见弱口令。
+ */
+export function validateLoginPassword(pwd: string): PasswordPolicyResult {
+  const reasons: string[] = [];
+  if (typeof pwd !== "string" || pwd.length < 8 || pwd.length > 64) {
+    reasons.push("长度必须为 8-64 位");
+  }
+  if (!/[A-Z]/.test(pwd)) reasons.push("必须包含大写字母");
+  if (!/[a-z]/.test(pwd)) reasons.push("必须包含小写字母");
+  if (!/[0-9]/.test(pwd)) reasons.push("必须包含数字");
+  if (WEAK_PASSWORDS.has(pwd)) reasons.push("禁止使用常见弱密码");
+  return { ok: reasons.length === 0, reasons };
+}
+
 /** 服务器系统密码校验：长度 8-16、大写、小写、数字、特殊字符、禁止连续字符与弱口令。 */
 export interface PasswordPolicyResult {
   ok: boolean;

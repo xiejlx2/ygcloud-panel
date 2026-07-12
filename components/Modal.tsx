@@ -1,7 +1,13 @@
 "use client";
 
-/** 基础模态框：居中卡片 + 遮罩 + ESC/点击遮罩关闭。 */
+/**
+ * 基础模态框：居中卡片 + 遮罩 + ESC/点击遮罩关闭。
+ * 通过 portal 渲染到 document.body：若直接原地渲染，祖先元素的
+ * transform / backdrop-filter（如顶栏的 backdrop-blur）会把 fixed
+ * 定位的包含块改成该祖先，弹窗会被"困"在局部而不是全屏居中。
+ */
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { IconX } from "@/components/Icons";
 
 export function Modal({
@@ -28,7 +34,7 @@ export function Modal({
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
         className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
@@ -56,6 +62,7 @@ export function Modal({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
