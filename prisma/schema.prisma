@@ -49,6 +49,8 @@ model User {
   serverCache         ServerCache[] @relation("ServerCacheOwner")
   // 代理商已知地域表
   knownZones          ResellerKnownZone[] @relation("KnownZoneOwner")
+  // 代理商通知渠道配置
+  notifyConfig        ResellerNotifyConfig? @relation("NotifyConfigOwner")
 
   @@index([parentId])
   @@map("users")
@@ -179,4 +181,50 @@ model OperationLog {
   @@index([userId, createdAt])
   @@index([ecsResourceUuid])
   @@map("operation_logs")
+}
+
+// ===== 6. 代理商通知渠道配置 =====
+// 每个代理商一条。bot token / webhook url 含密钥，AES-256-GCM 加密存储（见 lib/crypto.ts），
+// 任何前端接口都不返回明文，仅展示后 4 位与密钥指纹。chat id 非敏感，明文存。
+model ResellerNotifyConfig {
+  id                        String    @id @default(cuid())
+  resellerId                String    @unique @map("reseller_id")
+  reseller                  User      @relation("NotifyConfigOwner", fields: [resellerId], references: [id], onDelete: Cascade)
+  enabled                   Boolean   @default(true)
+  // Telegram
+  telegramBotTokenEncrypted String?   @map("telegram_bot_token_encrypted")
+  telegramTokenSuffix       String?   @map("telegram_token_suffix")
+  telegramKeyHint           String?   @map("telegram_key_hint")
+  telegramChatId            String?   @map("telegram_chat_id")
+  // 企业 webhook：wecom | dingtalk | feishu
+  webhookType               String?   @map("webhook_type")
+  webhookUrlEncrypted       String?   @map("webhook_url_encrypted")
+  webhookKeyHint            String?   @map("webhook_key_hint")
+  // 诊断
+  lastRunAt                 DateTime? @map("last_run_at")
+  lastError                 String?   @map("last_error")
+  createdAt                 DateTime  @default(now()) @map("created_at")
+  updatedAt                 DateTime  @updatedAt @map("updated_at")
+
+  @@map("reseller_notify_configs")
+}
+
+// ===== 7. 通知发送记录（去重 + 历史）=====
+// 每条告警发送前先按 (resellerId, dedupKey) 查重，命中则跳过，避免重复轰炸。
+// dedupKey 规则见 lib/notifyScan.ts。
+model NotificationLog {
+  id         String   @id @default(cuid())
+  resellerId String   @map("reseller_id")
+  dedupKey   String   @map("dedup_key")
+  // expiry | recycle | token
+  kind       String
+  // 实际送达渠道，逗号分隔（telegram,wecom…）
+  channels   String?
+  success    Boolean  @default(true)
+  detail     String?
+  sentAt     DateTime @default(now()) @map("sent_at")
+
+  @@unique([resellerId, dedupKey])
+  @@index([resellerId, sentAt])
+  @@map("notification_logs")
 }

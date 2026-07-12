@@ -11,6 +11,7 @@ import {
   IconLink,
   IconLogs,
   IconKey,
+  IconBell,
 } from "@/components/Icons";
 
 const NAV = [
@@ -19,6 +20,7 @@ const NAV = [
   { href: "/admin/customers", label: "客户", icon: IconUsers },
   { href: "/admin/assignments", label: "分配", icon: IconLink },
   { href: "/admin/logs", label: "操作日志", icon: IconLogs },
+  { href: "/admin/notify", label: "通知设置", icon: IconBell },
   { href: "/admin/token", label: "接入配置", icon: IconKey },
 ];
 

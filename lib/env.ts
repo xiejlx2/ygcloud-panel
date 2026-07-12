@@ -19,6 +19,9 @@ export const env = {
   TOKEN_ENCRYPTION_KEY: required("TOKEN_ENCRYPTION_KEY"),
   JWT_SECRET: required("JWT_SECRET"),
   JWT_EXPIRES_HOURS: Number(process.env.JWT_EXPIRES_HOURS || "12"),
+  // 定时通知任务的调用密钥。由系统 crontab 通过 x-cron-secret 头传入，
+  // 校验通过才允许触发 /api/cron/notify。未设置则该端点直接拒绝（503）。
+  CRON_SECRET: process.env.CRON_SECRET || "",
 };
 
 /**

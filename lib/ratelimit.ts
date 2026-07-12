@@ -67,4 +67,6 @@ export const RL = {
   // 客户列表页触发的后台刷新：按代理商维度全局兜底，防止客户狂刷
   // 把 listInstances 的多区域扇出调用放大、打挂代理商 Token。
   clientRefresh: { capacity: 1, windowMs: 60 * 1000 }, // 每代理商 1 次 / 60 秒
+  notifyTest: { capacity: 5, windowMs: 5 * 60 * 1000 }, // 测试推送 5 次 / 5 分钟
+  loginPwdChange: { capacity: 5, windowMs: 10 * 60 * 1000 }, // 自助改登录密码 5 次 / 10 分钟
 } as const;
