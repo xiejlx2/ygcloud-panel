@@ -8,7 +8,6 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { verifyLoginPassword } from "@/lib/password";
 import { signSession, setSessionCookie } from "@/lib/auth";
-import { getSession } from "@/lib/auth";
 import { ok, err, handleError, getRequestIp, getUserAgent } from "@/lib/api";
 import { rateLimit, RL } from "@/lib/ratelimit";
 import { writeAudit } from "@/lib/audit";
@@ -31,10 +30,8 @@ function warnNoIpOnce(): void {
 
 export async function POST(req: NextRequest) {
   try {
-    // 已登录则拒绝再次登录（防误用）
-    const cur = await getSession();
-    if (cur) return err("ALREADY_LOGGED_IN", "已登录，请先退出", 400);
-
+    // 已登录时不拒绝：提交的仍是完整凭据，验证通过后直接签发新会话覆盖旧 cookie
+    // （切换账号的正常路径）。已登录用户访问 /login 页面时由页面服务端直接重定向。
     const json = await req.json().catch(() => null);
     const parsed = Body.safeParse(json);
     if (!parsed.success) {
