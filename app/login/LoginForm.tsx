@@ -6,7 +6,15 @@ import { api, ApiError } from "@/components/Api";
 import { Logo } from "@/components/Logo";
 import { IconShield, IconSpinner } from "@/components/Icons";
 
-export function LoginForm() {
+export function LoginForm({
+  panelName = "服务器控制台",
+  logoDataUrl = null,
+  subtitle = null,
+}: {
+  panelName?: string;
+  logoDataUrl?: string | null;
+  subtitle?: string | null;
+}) {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -40,7 +48,7 @@ export function LoginForm() {
 
       <div className="w-full max-w-sm">
         <div className="mb-6 flex justify-center">
-          <Logo />
+          <Logo name={panelName} logoDataUrl={logoDataUrl} subtitle={subtitle} />
         </div>
 
         <form onSubmit={submit} className="card space-y-4 p-6">

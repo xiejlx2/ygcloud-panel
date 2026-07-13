@@ -5,6 +5,7 @@
  */
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
+import { getBranding } from "@/lib/branding";
 import { LoginForm } from "./LoginForm";
 
 export default async function LoginPage() {
@@ -12,5 +13,12 @@ export default async function LoginPage() {
   if (s) {
     redirect(s.role === "reseller_admin" ? "/admin/dashboard" : "/client/servers");
   }
-  return <LoginForm />;
+  const b = await getBranding();
+  return (
+    <LoginForm
+      panelName={b.panelName}
+      logoDataUrl={b.logoDataUrl}
+      subtitle={b.loginSubtitle}
+    />
+  );
 }

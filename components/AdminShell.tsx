@@ -12,6 +12,7 @@ import {
   IconLogs,
   IconKey,
   IconBell,
+  IconBrush,
 } from "@/components/Icons";
 
 const NAV = [
@@ -21,10 +22,19 @@ const NAV = [
   { href: "/admin/assignments", label: "分配", icon: IconLink },
   { href: "/admin/logs", label: "操作日志", icon: IconLogs },
   { href: "/admin/notify", label: "通知设置", icon: IconBell },
+  { href: "/admin/branding", label: "品牌设置", icon: IconBrush },
   { href: "/admin/token", label: "接入配置", icon: IconKey },
 ];
 
-export function AdminShell({ children }: { children: React.ReactNode }) {
+export function AdminShell({
+  children,
+  panelName = "服务器控制台",
+  logoDataUrl = null,
+}: {
+  children: React.ReactNode;
+  panelName?: string;
+  logoDataUrl?: string | null;
+}) {
   const pathname = usePathname();
 
   return (
@@ -32,9 +42,9 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/85 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4">
           <Link href="/admin/dashboard" className="flex items-center gap-2">
-            <LogoMark className="h-7 w-7" />
+            <LogoMark className="h-7 w-7" logoDataUrl={logoDataUrl} />
             <span className="hidden text-sm font-semibold tracking-tight text-slate-900 sm:block">
-              服务器控制台
+              {panelName}
             </span>
           </Link>
           <span className="mx-1 hidden h-5 w-px bg-slate-200 sm:block" />

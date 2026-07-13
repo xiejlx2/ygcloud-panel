@@ -18,6 +18,7 @@ import { getExpiryInfo } from "@/lib/expiry";
 import { listInstancesDetailed, CloudApiError } from "@/lib/cloud";
 import { syncServerCache, getKnownZones } from "@/lib/sync";
 import { sendToConfig, hasAnyChannel } from "@/lib/notify";
+import { getBranding } from "@/lib/branding";
 
 const EXPIRE_THRESHOLDS = [7, 3, 1, 0] as const;
 
@@ -185,7 +186,8 @@ export async function runNotifyForReseller(
   }
 
   // ===== 3) 组装消息并发送 =====
-  const parts: string[] = ["【服务器控制台 · 提醒】"];
+  const branding = await getBranding();
+  const parts: string[] = [`【${branding.panelName} · 提醒】`];
   if (tokenLines.length) parts.push(tokenLines.join("\n"));
   if (expiringLines.length) parts.push(`即将到期（${expiringLines.length}）：\n${expiringLines.join("\n")}`);
   if (recycleLines.length)

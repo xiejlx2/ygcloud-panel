@@ -11,7 +11,15 @@ const NAV = [
   { href: "/client/logs", label: "操作记录", icon: IconLogs },
 ];
 
-export function ClientShell({ children }: { children: React.ReactNode }) {
+export function ClientShell({
+  children,
+  panelName = "服务器控制台",
+  logoDataUrl = null,
+}: {
+  children: React.ReactNode;
+  panelName?: string;
+  logoDataUrl?: string | null;
+}) {
   const pathname = usePathname();
 
   return (
@@ -19,9 +27,9 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/85 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4">
           <Link href="/client/servers" className="flex items-center gap-2">
-            <LogoMark className="h-7 w-7" />
+            <LogoMark className="h-7 w-7" logoDataUrl={logoDataUrl} />
             <span className="hidden text-sm font-semibold tracking-tight text-slate-900 sm:block">
-              服务器控制台
+              {panelName}
             </span>
           </Link>
           <span className="mx-1 hidden h-5 w-px bg-slate-200 sm:block" />

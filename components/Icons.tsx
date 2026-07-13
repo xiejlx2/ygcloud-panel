@@ -134,6 +134,13 @@ export const IconSearch = (p: IconProps) => (
   </svg>
 );
 
+export const IconBrush = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M9.06 11.9 19.4 1.56a2.1 2.1 0 0 1 3 3L12.1 14.94" />
+    <path d="M7.5 13.5c-2.5 0-4 2-4.5 5.5 2 .5 7 1 8.5-2 .9-1.8-.5-3.5-2.3-3.5-.6 0-1.2 0-1.7 0Z" />
+  </svg>
+);
+
 export const IconBell = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />

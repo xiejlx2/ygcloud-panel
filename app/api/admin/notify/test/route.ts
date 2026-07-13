@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { assertIsResellerAdmin } from "@/lib/permissions";
 import { rateLimit, RL } from "@/lib/ratelimit";
 import { sendToConfig, hasAnyChannel } from "@/lib/notify";
+import { getBranding } from "@/lib/branding";
 import { ok, err, handleError } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
 
@@ -25,7 +26,8 @@ export async function POST() {
       return err("NO_CHANNEL", "尚未配置任何通知渠道", 400);
     }
 
-    const text = `【服务器控制台】测试消息：通知渠道已连通 ✅（${new Date().toLocaleString("zh-CN")}）`;
+    const branding = await getBranding();
+    const text = `【${branding.panelName}】测试消息：通知渠道已连通 ✅（${new Date().toLocaleString("zh-CN")}）`;
     const { ok: sent, results } = await sendToConfig(cfg, text);
 
     await writeAudit({

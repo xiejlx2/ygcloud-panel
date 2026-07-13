@@ -209,6 +209,22 @@ model ResellerNotifyConfig {
   @@map("reseller_notify_configs")
 }
 
+// ===== 7.5 面板品牌设置（白标）=====
+// 实例级单行配置（id 固定 "default"）。全部字段可空：空 = 使用内置默认品牌
+// （菱形标 +「服务器控制台」）。将来若做多代理商 SaaS，可升级为按代理商/域名一行。
+model PanelSetting {
+  id            String   @id @default("default")
+  // 面板名称：顶栏、登录页、浏览器标题、通知消息前缀
+  panelName     String?  @map("panel_name")
+  // Logo：data URL（data:image/...;base64,...），上传时校验类型与大小
+  logoDataUrl   String?  @map("logo_data_url")
+  // 登录页副标题（品牌下方一行小字，可放口号/公司名）
+  loginSubtitle String?  @map("login_subtitle")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("panel_settings")
+}
+
 // ===== 7. 通知发送记录（去重 + 历史）=====
 // 每条告警发送前先按 (resellerId, dedupKey) 查重，命中则跳过，避免重复轰炸。
 // dedupKey 规则见 lib/notifyScan.ts。
