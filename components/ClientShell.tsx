@@ -4,11 +4,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogoMark } from "@/components/Logo";
 import { UserMenu } from "@/components/UserMenu";
-import { IconServer, IconLogs } from "@/components/Icons";
+import { IconServer, IconLogs, IconBell } from "@/components/Icons";
 
 const NAV = [
   { href: "/client/servers", label: "我的服务器", icon: IconServer },
   { href: "/client/logs", label: "操作记录", icon: IconLogs },
+  { href: "/client/notify", label: "通知设置", icon: IconBell },
 ];
 
 export function ClientShell({
