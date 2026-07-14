@@ -5,6 +5,19 @@
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;
+  /* 品牌色阶（RGB 三元组，供 tailwind rgb(var()/alpha) 使用）。
+     默认 = 靛蓝 Indigo；配置了主题色时由 app/layout.tsx 注入的 <style> 覆盖
+     （色阶由 lib/theme.ts derivePalette 从基色派生）。 */
+  --brand-50: 238 242 255;
+  --brand-100: 224 231 255;
+  --brand-200: 199 210 254;
+  --brand-300: 165 180 252;
+  --brand-400: 129 140 248;
+  --brand-500: 99 102 241;
+  --brand-600: 79 70 229;
+  --brand-700: 67 56 202;
+  --brand-def: 79 70 229;
+  --brand-dark: 67 56 202;
 }
 
 html,

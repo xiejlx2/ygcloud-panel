@@ -220,6 +220,9 @@ model PanelSetting {
   logoDataUrl   String?  @map("logo_data_url")
   // 登录页副标题（品牌下方一行小字，可放口号/公司名）
   loginSubtitle String?  @map("login_subtitle")
+  // 主题色（#RRGGBB，对应色板 600 位基色）：按钮/导航高亮/聚焦态等全站跟随；
+  // 空 = 默认靛蓝。色阶派生见 lib/theme.ts
+  themeColor    String?  @map("theme_color")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   @@map("panel_settings")

@@ -14,6 +14,8 @@ export interface Branding {
   /** null = 使用内置菱形 LogoMark */
   logoDataUrl: string | null;
   loginSubtitle: string | null;
+  /** 主题色 #RRGGBB；null = 默认靛蓝 */
+  themeColor: string | null;
   /** 是否有任何自定义项（用于设置页展示） */
   customized: boolean;
 }
@@ -26,6 +28,12 @@ export const getBranding = cache(async (): Promise<Branding> => {
     panelName: row?.panelName?.trim() || DEFAULT_PANEL_NAME,
     logoDataUrl: row?.logoDataUrl || null,
     loginSubtitle: row?.loginSubtitle?.trim() || null,
-    customized: !!(row?.panelName || row?.logoDataUrl || row?.loginSubtitle),
+    themeColor: row?.themeColor || null,
+    customized: !!(
+      row?.panelName ||
+      row?.logoDataUrl ||
+      row?.loginSubtitle ||
+      row?.themeColor
+    ),
   };
 });

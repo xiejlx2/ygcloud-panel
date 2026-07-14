@@ -22,12 +22,13 @@ export function LogoMark({
       />
     );
   }
+  // 渐变/点缀色走品牌 CSS 变量：配置主题色后默认图标也跟随品牌色
   return (
     <svg viewBox="0 0 32 32" className={className} aria-hidden="true">
       <defs>
         <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#6366f1" />
-          <stop offset="1" stopColor="#4338ca" />
+          <stop offset="0" stopColor="rgb(var(--brand-500))" />
+          <stop offset="1" stopColor="rgb(var(--brand-700))" />
         </linearGradient>
       </defs>
       <rect x="2" y="2" width="28" height="28" rx="8" fill="url(#lg)" />
@@ -37,7 +38,7 @@ export function LogoMark({
         strokeWidth="2"
         strokeLinecap="round"
       />
-      <circle cx="22.5" cy="19.5" r="1.4" fill="#c7d2fe" />
+      <circle cx="22.5" cy="19.5" r="1.4" fill="rgb(var(--brand-200))" />
     </svg>
   );
 }

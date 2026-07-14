@@ -31,6 +31,12 @@ const LOGO_RE = /^data:image\/(png|jpeg|webp|svg\+xml);base64,[A-Za-z0-9+/]+=*$/
 const PostBody = z.object({
   panelName: z.string().max(30).nullable().optional(),
   loginSubtitle: z.string().max(60).nullable().optional(),
+  // 主题色 #RRGGBB；null 表示恢复默认靛蓝
+  themeColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/, "主题色必须是 #RRGGBB 格式")
+    .nullable()
+    .optional(),
   logoDataUrl: z
     .string()
     .max(400_000, "Logo 图片过大（请压缩到 300KB 以内）")
@@ -55,6 +61,7 @@ export async function POST(req: NextRequest) {
     const data: Record<string, unknown> = {};
     if (b.panelName !== undefined) data.panelName = b.panelName?.trim() || null;
     if (b.loginSubtitle !== undefined) data.loginSubtitle = b.loginSubtitle?.trim() || null;
+    if (b.themeColor !== undefined) data.themeColor = b.themeColor;
     if (b.logoDataUrl) data.logoDataUrl = b.logoDataUrl;
     if (b.clearLogo) data.logoDataUrl = null;
 
@@ -71,6 +78,7 @@ export async function POST(req: NextRequest) {
       requestPayload: {
         panelName: b.panelName,
         loginSubtitle: b.loginSubtitle,
+        themeColor: b.themeColor,
         logoSet: !!b.logoDataUrl,
         clearLogo: !!b.clearLogo,
       },
