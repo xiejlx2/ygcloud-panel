@@ -18,6 +18,8 @@ export interface Branding {
   themeColor: string | null;
   /** 是否有任何自定义项（用于设置页展示） */
   customized: boolean;
+  /** 配置最后更新时间戳（favicon 缓存版本号用；无配置行时为 0） */
+  updatedAtEpoch: number;
 }
 
 export const getBranding = cache(async (): Promise<Branding> => {
@@ -35,5 +37,6 @@ export const getBranding = cache(async (): Promise<Branding> => {
       row?.loginSubtitle ||
       row?.themeColor
     ),
+    updatedAtEpoch: row?.updatedAt ? Math.floor(row.updatedAt.getTime() / 1000) : 0,
   };
 });
