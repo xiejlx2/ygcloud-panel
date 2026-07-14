@@ -29,7 +29,8 @@ export async function GET() {
     }
   }
 
-  // 默认菱形标：颜色随主题色（favicon 是独立文档，不能用页面的 CSS 变量，需烘焙实色）
+  // 默认层叠菱形标（与 components/Logo.tsx 的 LogoMark 同款图形）：
+  // 颜色随主题色。favicon 是独立文档，不能用页面的 CSS 变量，需烘焙实色。
   const base =
     b.themeColor && THEME_COLOR_RE.test(b.themeColor) ? b.themeColor : DEFAULT_THEME_COLOR;
   const p = derivePalette(base);
@@ -39,8 +40,9 @@ export async function GET() {
 <stop offset="0" stop-color="${rgb("500")}"/><stop offset="1" stop-color="${rgb("700")}"/>
 </linearGradient></defs>
 <rect x="2" y="2" width="28" height="28" rx="8" fill="url(#g)"/>
-<path d="M10 12.5h12M10 16h12M10 19.5h7" stroke="white" stroke-width="2" stroke-linecap="round"/>
-<circle cx="22.5" cy="19.5" r="1.4" fill="${rgb("200")}"/>
+<path d="M16 7.5 23.5 12 16 16.5 8.5 12Z" fill="white"/>
+<path d="M8.5 16.5 16 21l7.5-4.5" stroke="white" stroke-opacity="0.65" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<path d="M8.5 21 16 25.5 23.5 21" stroke="white" stroke-opacity="0.32" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>`;
   return new Response(svg, {
     headers: {

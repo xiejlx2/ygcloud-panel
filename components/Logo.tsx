@@ -22,7 +22,8 @@ export function LogoMark({
       />
     );
   }
-  // 渐变/点缀色走品牌 CSS 变量：配置主题色后默认图标也跟随品牌色
+  // 渐变色走品牌 CSS 变量：配置主题色后默认图标也跟随品牌色。
+  // 图形 = 层叠菱形（layers）：上层实心 + 两道渐隐层线，寓意云基础设施/服务器栈。
   return (
     <svg viewBox="0 0 32 32" className={className} aria-hidden="true">
       <defs>
@@ -32,13 +33,25 @@ export function LogoMark({
         </linearGradient>
       </defs>
       <rect x="2" y="2" width="28" height="28" rx="8" fill="url(#lg)" />
+      <path d="M16 7.5 23.5 12 16 16.5 8.5 12Z" fill="white" />
       <path
-        d="M10 12.5h12M10 16h12M10 19.5h7"
+        d="M8.5 16.5 16 21l7.5-4.5"
         stroke="white"
-        strokeWidth="2"
+        strokeOpacity="0.65"
+        strokeWidth="2.2"
         strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
       />
-      <circle cx="22.5" cy="19.5" r="1.4" fill="rgb(var(--brand-200))" />
+      <path
+        d="M8.5 21 16 25.5 23.5 21"
+        stroke="white"
+        strokeOpacity="0.32"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
     </svg>
   );
 }
