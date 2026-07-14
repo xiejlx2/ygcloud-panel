@@ -14,11 +14,16 @@ interface Props {
   onDone?: () => void;
   // 改密码：默认对代理商与客户都开放
   canModifyPassword?: boolean;
-  // 重装系统：仅代理商可用。客户角色下无论如何传参都强制隐藏
-  // （破坏性操作已从客户侧收权，后端同样硬拒绝）。
+  // 重装系统：代理商默认可用；客户默认隐藏，仅当 allowCustomerReinstall
+  // （代理商为该客户开放了重装权限）时才显示。后端始终硬校验。
   canReinstall?: boolean;
+  allowCustomerReinstall?: boolean;
   // menu：紧凑下拉（表格行用）；inline：平铺按钮（详情页用）
   variant?: "menu" | "inline";
+  // 别名/备注：传入当前值用于弹窗预填；不传则该入口不显示
+  noteAlias?: string | null;
+  noteText?: string | null;
+  showNote?: boolean;
 }
 
 interface ImageItem {
@@ -49,14 +54,50 @@ export function ServerActionButtons({
   onDone,
   canModifyPassword = true,
   canReinstall = true,
+  allowCustomerReinstall = false,
   variant = "inline",
+  noteAlias = null,
+  noteText = null,
+  showNote = false,
 }: Props) {
-  // 客户角色强制关闭重装入口，页面层传参无法覆盖
-  const reinstallAllowed = canReinstall && role !== "customer";
+  // 客户仅在被授予重装权限时显示入口；代理商默认可用。后端始终硬校验。
+  const reinstallAllowed =
+    canReinstall && (role !== "customer" || allowCustomerReinstall);
   const toast = useToast();
   const confirm = useConfirm();
   const [pending, setPending] = useState<PendingAction>(null);
   const [taskStatus, setTaskStatus] = useState<string | null>(null);
+
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [aliasInput, setAliasInput] = useState("");
+  const [noteInput, setNoteInput] = useState("");
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteErr, setNoteErr] = useState<string | null>(null);
+
+  function openNote() {
+    setAliasInput(noteAlias ?? "");
+    setNoteInput(noteText ?? "");
+    setNoteErr(null);
+    setNoteOpen(true);
+  }
+
+  async function submitNote() {
+    setNoteErr(null);
+    setNoteSaving(true);
+    try {
+      await api(`/api/servers/${uuid}/note`, {
+        method: "PATCH",
+        body: JSON.stringify({ alias: aliasInput.trim() || null, note: noteInput.trim() || null }),
+      });
+      setNoteOpen(false);
+      toast.success("已保存别名 / 备注");
+      onDone?.();
+    } catch (e) {
+      setNoteErr((e as ApiError).message || "保存失败");
+    } finally {
+      setNoteSaving(false);
+    }
+  }
 
   const [pwdOpen, setPwdOpen] = useState(false);
   const [pwd, setPwd] = useState("");
@@ -214,6 +255,49 @@ export function ServerActionButtons({
 
   const modals = (
     <>
+      {/* 别名 / 备注 */}
+      <Modal
+        open={noteOpen}
+        onClose={() => setNoteOpen(false)}
+        title="别名 / 备注"
+        footer={
+          <>
+            <button className="btn-default" onClick={() => setNoteOpen(false)}>取消</button>
+            <button className="btn-primary" disabled={noteSaving} onClick={submitNote}>
+              {noteSaving && <IconSpinner className="h-4 w-4" />}
+              保存
+            </button>
+          </>
+        }
+      >
+        <label className="label">别名</label>
+        <input
+          className="input"
+          placeholder="给这台服务器起个好记的名字"
+          maxLength={60}
+          value={aliasInput}
+          onChange={(e) => setAliasInput(e.target.value)}
+          autoFocus
+        />
+        <label className="label mt-3">备注</label>
+        <textarea
+          className="textarea"
+          rows={3}
+          placeholder="用途、负责人等（仅在本面板显示，不影响云端）"
+          maxLength={300}
+          value={noteInput}
+          onChange={(e) => setNoteInput(e.target.value)}
+        />
+        <p className="mt-2 text-xs text-slate-400">
+          别名与备注仅保存在本面板、不会同步到云平台；设置后列表将优先显示别名。
+        </p>
+        {noteErr && (
+          <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            {noteErr}
+          </div>
+        )}
+      </Modal>
+
       {/* 改密码 */}
       <Modal
         open={pwdOpen}
@@ -364,9 +448,11 @@ export function ServerActionButtons({
         taskStatus={taskStatus}
         canModifyPassword={canModifyPassword}
         canReinstall={reinstallAllowed}
+        showNote={showNote}
         onAct={act}
         onPassword={() => setPwdOpen(true)}
         onReinstall={openReinstall}
+        onNote={openNote}
       >
         {modals}
       </ActionMenu>
@@ -388,6 +474,11 @@ export function ServerActionButtons({
           {pending === "force-stop" && <IconSpinner className="h-3.5 w-3.5" />}
           强制关机
         </button>
+        {showNote && (
+          <button className="btn-ghost btn-sm" onClick={openNote}>
+            别名 / 备注
+          </button>
+        )}
         {canModifyPassword && (
           <button className="btn-ghost btn-sm" disabled={pending === "password"} onClick={() => setPwdOpen(true)}>
             改密码
@@ -416,9 +507,11 @@ function ActionMenu({
   taskStatus,
   canModifyPassword,
   canReinstall,
+  showNote,
   onAct,
   onPassword,
   onReinstall,
+  onNote,
   children,
 }: {
   busy: boolean;
@@ -426,9 +519,11 @@ function ActionMenu({
   taskStatus: string | null;
   canModifyPassword: boolean;
   canReinstall: boolean;
+  showNote: boolean;
   onAct: (a: PowerAction) => void;
   onPassword: () => void;
   onReinstall: () => void;
+  onNote: () => void;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -497,7 +592,10 @@ function ActionMenu({
           <MenuItem disabled={busy} onClick={() => run(() => onAct("stop"))}>关机</MenuItem>
           <MenuItem disabled={busy} onClick={() => run(() => onAct("restart"))}>重启</MenuItem>
           <MenuItem danger disabled={busy} onClick={() => run(() => onAct("force-stop"))}>强制关机</MenuItem>
-          {(canModifyPassword || canReinstall) && <div className="my-1 h-px bg-slate-100" />}
+          {(canModifyPassword || canReinstall || showNote) && <div className="my-1 h-px bg-slate-100" />}
+          {showNote && (
+            <MenuItem onClick={() => run(onNote)}>别名 / 备注</MenuItem>
+          )}
           {canModifyPassword && (
             <MenuItem onClick={() => run(onPassword)}>修改密码</MenuItem>
           )}

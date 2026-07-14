@@ -29,6 +29,7 @@ export async function GET() {
         email: true,
         createdAt: true,
         lastLoginAt: true,
+        canReinstall: true,
         _count: { select: { assignmentsAsCustomer: { where: { status: "active" } } } },
       },
     });
@@ -44,6 +45,7 @@ export async function GET() {
         email: c.email,
         createdAt: c.createdAt,
         lastLoginAt: c.lastLoginAt,
+        canReinstall: c.canReinstall,
         serverCount: c._count.assignmentsAsCustomer,
       })),
     });

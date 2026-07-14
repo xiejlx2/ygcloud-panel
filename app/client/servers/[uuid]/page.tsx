@@ -12,6 +12,8 @@ import { Skeleton } from "@/components/Skeleton";
 interface Detail {
   ecsResourceUUID: string;
   instanceName: string | null;
+  customerAlias: string | null;
+  customerNote: string | null;
   publicIpAddress: string | null;
   internalIpAddress: string | null;
   regionCode: string | null;
@@ -36,6 +38,7 @@ export default function ClientServerDetailPage() {
     `/api/servers/${encodeURIComponent(uuid)}`,
     api,
   );
+  const { data: me } = useSWR<{ canReinstall?: boolean }>("/api/auth/me", api);
 
   return (
     <div className="space-y-5">
@@ -47,11 +50,17 @@ export default function ClientServerDetailPage() {
           {isLoading ? (
             <Skeleton className="h-6 w-48" />
           ) : (
-            data?.instanceName || data?.ecsResourceUUID || uuid
+            data?.customerAlias || data?.instanceName || data?.ecsResourceUUID || uuid
           )}
         </h1>
         {data && (
-          <div className="font-mono text-xs text-slate-400">{data.ecsResourceUUID}</div>
+          <div className="font-mono text-xs text-slate-400">
+            {data.customerAlias && data.instanceName ? `${data.instanceName} · ` : ""}
+            {data.ecsResourceUUID}
+          </div>
+        )}
+        {data?.customerNote && (
+          <div className="mt-1 text-xs text-slate-500">📝 {data.customerNote}</div>
         )}
       </div>
 
@@ -113,6 +122,10 @@ export default function ClientServerDetailPage() {
             <ServerActionButtons
               uuid={data.ecsResourceUUID}
               role="customer"
+              allowCustomerReinstall={!!me?.canReinstall}
+              showNote
+              noteAlias={data.customerAlias}
+              noteText={data.customerNote}
               onDone={() => mutate()}
             />
             <p className="mt-3 text-xs text-slate-400">

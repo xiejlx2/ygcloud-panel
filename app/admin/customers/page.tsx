@@ -22,10 +22,11 @@ interface Customer {
   email: string | null;
   createdAt: string;
   lastLoginAt: string | null;
+  canReinstall: boolean;
   serverCount: number;
 }
 
-const COLS = 7;
+const COLS = 8;
 
 export default function AdminCustomersPage() {
   const { data, error, mutate, isLoading } = useSWR<{ items: Customer[] }>(
@@ -63,6 +64,10 @@ export default function AdminCustomersPage() {
                 <th>状态</th>
                 <th>服务器</th>
                 <th>联系方式</th>
+                <th>
+                  重装权限
+                  <span className="ml-1 text-[10px] font-normal text-slate-400">客户自助重装</span>
+                </th>
                 <th>最近登录</th>
                 <th>操作</th>
               </tr>
@@ -110,6 +115,23 @@ function CustomerRow({ c, onMutate }: { c: Customer; onMutate: () => void }) {
   const toast = useToast();
   const confirm = useConfirm();
   const [resetOpen, setResetOpen] = useState(false);
+  const [savingPerm, setSavingPerm] = useState(false);
+
+  async function toggleReinstall(next: boolean) {
+    setSavingPerm(true);
+    try {
+      await api(`/api/admin/customers/${c.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ canReinstall: next }),
+      });
+      toast.success(next ? "已开放重装权限" : "已关闭重装权限");
+      onMutate();
+    } catch (e) {
+      toast.error((e as ApiError).message);
+    } finally {
+      setSavingPerm(false);
+    }
+  }
 
   async function disable() {
     const ok = await confirm({
@@ -145,6 +167,24 @@ function CustomerRow({ c, onMutate }: { c: Customer; onMutate: () => void }) {
         {c.phone && <div className="text-slate-600">{c.phone}</div>}
         {c.email && <div className="text-slate-500">{c.email}</div>}
         {!c.phone && !c.email && <span className="text-slate-400">—</span>}
+      </td>
+      <td>
+        <button
+          role="switch"
+          aria-checked={c.canReinstall}
+          disabled={savingPerm}
+          onClick={() => toggleReinstall(!c.canReinstall)}
+          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50 ${
+            c.canReinstall ? "bg-brand" : "bg-slate-300"
+          }`}
+          title={c.canReinstall ? "已开放，点击关闭" : "已关闭，点击开放"}
+        >
+          <span
+            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+              c.canReinstall ? "translate-x-4" : "translate-x-0.5"
+            }`}
+          />
+        </button>
       </td>
       <td className="whitespace-nowrap text-xs text-slate-500">
         {c.lastLoginAt ? new Date(c.lastLoginAt).toLocaleString() : "—"}

@@ -31,6 +31,8 @@ import {
 interface Server {
   ecsResourceUUID: string;
   instanceName: string | null;
+  customerAlias: string | null;
+  customerNote: string | null;
   publicIpAddress: string | null;
   regionName: string | null;
   cpu: number | null;
@@ -103,7 +105,7 @@ export default function AdminServersPage() {
     let list = items;
     if (kw) {
       list = list.filter((s) =>
-        [s.instanceName, s.publicIpAddress, s.ecsResourceUUID, s.regionName, s.assignedCustomerName]
+        [s.instanceName, s.customerAlias, s.customerNote, s.publicIpAddress, s.ecsResourceUUID, s.regionName, s.assignedCustomerName]
           .filter(Boolean)
           .some((v) => String(v).toLowerCase().includes(kw)),
       );
@@ -375,13 +377,21 @@ export default function AdminServersPage() {
 
                   {/* 服务器：名称 / IP / uuid */}
                   <td>
-                    <div className="font-medium text-slate-800">{s.instanceName || "—"}</div>
+                    <div className="font-medium text-slate-800">
+                      {s.customerAlias || s.instanceName || "—"}
+                    </div>
+                    {s.customerAlias && s.instanceName && (
+                      <div className="text-[11px] text-slate-400">{s.instanceName}</div>
+                    )}
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
                       <span className="font-mono text-slate-500">
                         {s.publicIpAddress || "无公网 IP"}
                       </span>
                       <span className="font-mono text-slate-300">{s.ecsResourceUUID}</span>
                     </div>
+                    {s.customerNote && (
+                      <div className="mt-0.5 text-xs text-slate-500">📝 {s.customerNote}</div>
+                    )}
                   </td>
 
                   {/* 配置：规格 chips + 地区 · 系统 */}
@@ -439,6 +449,9 @@ export default function AdminServersPage() {
                       uuid={s.ecsResourceUUID}
                       role="reseller_admin"
                       variant="menu"
+                      showNote
+                      noteAlias={s.customerAlias}
+                      noteText={s.customerNote}
                       onDone={() => mutate()}
                     />
                   </td>

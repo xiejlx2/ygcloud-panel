@@ -30,10 +30,16 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   try {
     const user = await getSession();
     if (!user) return err("UNAUTHORIZED", "未登录", 401);
-    // 重装为破坏性操作，权限不下放给最终客户（防误操作清空数据）。
-    // 前端隐藏按钮不算权限控制，必须在此硬拒绝。
+    // 重装为破坏性操作。代理商始终可用；客户仅当被代理商授予 canReinstall 时可用。
+    // 前端隐藏按钮不算权限控制，必须在此硬校验（回查数据库当前权限，防旧会话/篡改）。
     if (user.role !== "reseller_admin") {
-      return err("FORBIDDEN", "重装系统仅限管理员操作，如有需要请联系您的服务商", 403);
+      const me = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { canReinstall: true },
+      });
+      if (!me?.canReinstall) {
+        return err("FORBIDDEN", "重装系统未对你开放，如有需要请联系您的服务商", 403);
+      }
     }
     await assertCanAccessServer(user, ctx.params.uuid);
 

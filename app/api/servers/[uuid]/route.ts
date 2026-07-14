@@ -65,6 +65,9 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
       ecsStatus: live?.ecsStatus ?? cached?.ecsStatus ?? null,
       ecsPendingStatus: live?.ecsPendingStatus ?? cached?.ecsPendingStatus ?? null,
       expireTime: live?.expireTime ?? cached?.expireTime?.toISOString() ?? null,
+      // 本地别名/备注只存在于缓存，不受上游实时数据影响
+      customerAlias: cached?.customerAlias ?? null,
+      customerNote: cached?.customerNote ?? null,
       lastSyncedAt: cached?.lastSyncedAt ?? null,
     };
 

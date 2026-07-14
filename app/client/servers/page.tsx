@@ -22,6 +22,8 @@ import { getExpiryInfo } from "@/lib/expiry";
 interface Server {
   ecsResourceUUID: string;
   instanceName: string | null;
+  customerAlias: string | null;
+  customerNote: string | null;
   publicIpAddress: string | null;
   regionName: string | null;
   cpu: number | null;
@@ -41,6 +43,7 @@ export default function ClientServersPage() {
     api,
     { refreshInterval: 15_000 }, // 后台静默刷新状态
   );
+  const { data: me } = useSWR<{ canReinstall?: boolean }>("/api/auth/me", api);
   const items = useMemo(() => data?.items ?? [], [data]);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [expireSort, setExpireSort] = useState<SortDir>(null);
@@ -154,14 +157,20 @@ export default function ClientServersPage() {
                       href={`/client/servers/${encodeURIComponent(s.ecsResourceUUID)}`}
                       className="font-medium text-brand hover:underline"
                     >
-                      {s.instanceName || "—"}
+                      {s.customerAlias || s.instanceName || "—"}
                     </Link>
+                    {s.customerAlias && s.instanceName && (
+                      <div className="text-[11px] text-slate-400">{s.instanceName}</div>
+                    )}
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
                       <span className="font-mono text-slate-500">
                         {s.publicIpAddress || "无公网 IP"}
                       </span>
                       <span className="font-mono text-slate-300">{s.ecsResourceUUID}</span>
                     </div>
+                    {s.customerNote && (
+                      <div className="mt-0.5 text-xs text-slate-500">📝 {s.customerNote}</div>
+                    )}
                   </td>
                   <td>
                     <div className="flex flex-wrap gap-1">
@@ -192,6 +201,10 @@ export default function ClientServersPage() {
                       uuid={s.ecsResourceUUID}
                       role="customer"
                       variant="menu"
+                      allowCustomerReinstall={!!me?.canReinstall}
+                      showNote
+                      noteAlias={s.customerAlias}
+                      noteText={s.customerNote}
                       onDone={() => mutate()}
                     />
                   </td>

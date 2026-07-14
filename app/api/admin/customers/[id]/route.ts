@@ -60,6 +60,7 @@ const PatchBody = z.object({
   phone: z.string().max(30).nullable().optional(),
   email: z.string().email().max(100).nullable().optional(),
   status: z.enum(["active", "disabled"]).optional(),
+  canReinstall: z.boolean().optional(),
 });
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {

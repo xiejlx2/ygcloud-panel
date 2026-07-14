@@ -30,6 +30,8 @@ export async function GET() {
       return {
         ecsResourceUUID: s.ecsResourceUuid,
         instanceName: s.instanceName,
+        customerAlias: s.customerAlias,
+        customerNote: s.customerNote,
         publicIpAddress: s.publicIpAddress,
         internalIpAddress: s.internalIpAddress,
         regionCode: s.regionCode,

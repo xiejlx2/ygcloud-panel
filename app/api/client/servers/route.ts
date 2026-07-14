@@ -63,6 +63,8 @@ export async function GET(req: NextRequest) {
       items: servers.map((s) => ({
         ecsResourceUUID: s.ecsResourceUuid,
         instanceName: s.instanceName,
+        customerAlias: s.customerAlias,
+        customerNote: s.customerNote,
         publicIpAddress: s.publicIpAddress,
         internalIpAddress: s.internalIpAddress,
         regionName: s.regionName,

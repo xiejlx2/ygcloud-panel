@@ -29,6 +29,8 @@ model User {
   status       String    @default("active")
   // 会话版本：签入 JWT，重置密码时 +1，使该用户所有旧会话立即失效
   tokenVersion Int       @default(0) @map("token_version")
+  // 是否允许该客户自助重装系统（破坏性操作，默认关闭，由代理商按客户开启）
+  canReinstall Boolean   @default(false) @map("can_reinstall")
   remark       String?
   phone        String?
   email        String?
@@ -121,6 +123,9 @@ model ServerCache {
   ecsStatus         String?   @map("ecs_status")
   ecsPendingStatus  String?   @map("ecs_pending_status")
   expireTime        DateTime? @map("expire_time")
+  // 本地别名/备注（面板内自定义，不回写上游；同步不覆盖，因上游 payload 不含这些字段）
+  customerAlias     String?   @map("customer_alias")
+  customerNote      String?   @map("customer_note")
   rawJson           String?
   lastSyncedAt      DateTime  @default(now()) @map("last_synced_at")
   createdAt         DateTime  @default(now()) @map("created_at")
