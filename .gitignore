@@ -35,3 +35,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 自助更新运行时产物（进度状态文件 + 备份/日志目录），仅存在于服务器
+/.update-status.json
+/.update-status.json.tmp
+/backups/

@@ -22,6 +22,14 @@ export const env = {
   // 定时通知任务的调用密钥。由系统 crontab 通过 x-cron-secret 头传入，
   // 校验通过才允许触发 /api/cron/notify。未设置则该端点直接拒绝（503）。
   CRON_SECRET: process.env.CRON_SECRET || "",
+  // 面板自助更新（一键升级）。仅当部署方在生产 .env 显式置 "1" 才启用，
+  // 防止本地/测试等未配置环境触发拉取+构建+重启。默认关闭。
+  SELF_UPDATE_ENABLED: process.env.SELF_UPDATE_ENABLED === "1",
+  // 拉取更新的 git 分支，默认 main。
+  SELF_UPDATE_BRANCH: process.env.SELF_UPDATE_BRANCH || "main",
+  // 构建完成后重启服务的命令（生产：systemctl restart ygcloud-panel）。
+  // 未设置时更新脚本会跳过重启（并在状态中提示）。
+  SELF_UPDATE_RESTART_CMD: process.env.SELF_UPDATE_RESTART_CMD || "",
 };
 
 /**

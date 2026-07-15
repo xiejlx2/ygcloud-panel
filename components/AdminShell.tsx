@@ -13,6 +13,7 @@ import {
   IconKey,
   IconBell,
   IconBrush,
+  IconRefresh,
 } from "@/components/Icons";
 
 const NAV = [
@@ -24,6 +25,7 @@ const NAV = [
   { href: "/admin/notify", label: "通知设置", icon: IconBell },
   { href: "/admin/branding", label: "品牌设置", icon: IconBrush },
   { href: "/admin/token", label: "接入配置", icon: IconKey },
+  { href: "/admin/update", label: "系统更新", icon: IconRefresh },
 ];
 
 export function AdminShell({
