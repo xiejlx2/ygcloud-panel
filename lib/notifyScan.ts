@@ -10,13 +10,12 @@
  * 去重（dedupKey）：
  *   到期：expire:<uuid>:<expireDate>:<threshold>（threshold ∈ 7/3/1/0；带到期日期纪元，续费后自然重置）
  *   回收站：recycle:<uuid>:<expireDate>
- *   Token/同步：token:<resellerId>（状态翻转语义：不健康且无此记录→发送并建记录；恢复健康→删记录）
+ *   Token/同步：token:<apiTokenId>（每个云账户独立去重与恢复）
  */
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getExpiryInfo } from "@/lib/expiry";
-import { listInstancesDetailed, CloudApiError } from "@/lib/cloud";
-import { syncServerCache, getKnownZones } from "@/lib/sync";
+import { syncAllServerCaches } from "@/lib/sync";
 import { sendToConfig, hasAnyChannel } from "@/lib/notify";
 import { getBranding } from "@/lib/branding";
 
@@ -107,49 +106,34 @@ export async function runNotifyForReseller(
 ): Promise<NotifyRunResult> {
   const cfg = await prisma.resellerNotifyConfig.findUnique({ where: { resellerId } });
 
-  // ===== 1) 真实同步 + Token/同步健康判定 =====
+  // ===== 1) 按云账户真实同步 + Key/同步健康判定 =====
   // 同步与通知解耦：无论是否配置了通知渠道，每日同步都必须执行，
   // 否则未配通知的代理商缓存会悄悄过期（到期时间/状态失真）。
   // 同步结果三分类（任务每小时跑，必须区分暂时性抖动与真失效，否则假告警会很吵）：
   //   syncOk       —— 成功：标记 token active，清除历史 token 告警（允许下次失效再告）
   //   tokenBroken  —— 凭据/鉴权/业务类错误：标记 invalid + 触发告警（去重）
   //   暂时性错误    —— 网络/超时：不告警、不改 token 状态、不清除告警记录，仅记入 lastError
-  let syncOk = true;
-  let tokenBroken = false;
-  let syncErrorMsg: string | null = null;
-  try {
-    const knownZones = await getKnownZones(resellerId);
-    const { instances, complete } = await listInstancesDetailed(resellerId, { knownZones });
-    await syncServerCache(resellerId, instances, complete, now);
-    // 成功：与 token/route.ts PATCH 成功分支一致，标记 active + lastVerifiedAt
-    await prisma.resellerApiToken
-      .updateMany({ where: { resellerId }, data: { status: "active", lastVerifiedAt: now } })
-      .catch(() => void 0);
-  } catch (e) {
-    syncOk = false;
-    syncErrorMsg = e instanceof Error ? e.message : String(e);
-    if (
-      e instanceof CloudApiError &&
-      [
-        "TOKEN_NOT_CONFIGURED",
-        "TOKEN_DECRYPT_FAILED",
-        "UPSTREAM_HTTP_ERROR",
-        "UPSTREAM_BIZ_ERROR",
-      ].includes(e.code)
-    ) {
-      tokenBroken = true;
-      await prisma.resellerApiToken
-        .updateMany({ where: { resellerId }, data: { status: "invalid" } })
-        .catch(() => void 0);
-    }
-  }
+  const accountSync = await syncAllServerCaches(resellerId, now);
+  const syncOk =
+    accountSync.length > 0 && accountSync.every((r) => r.ok && r.complete);
+  const tokenBroken = accountSync.some((r) => r.tokenBroken);
+  const tokenHealthy = accountSync.length > 0 && !tokenBroken;
+  const syncErrorMsg =
+    accountSync
+      .filter((r) => !r.ok || !r.complete)
+      .map((r) =>
+        r.ok
+          ? `${r.accountName}：部分地域拉取失败`
+          : `${r.accountName}：${r.error}`,
+      )
+      .join("；") || (accountSync.length === 0 ? "未配置任何云账户" : null);
 
   // 未启用通知或没配渠道：同步已完成，告警部分跳过（不组装、不发送、不记 dedup）
   if (!cfg || !cfg.enabled || !hasAnyChannel(cfg)) {
     return {
       resellerId,
       skipped: !cfg || !cfg.enabled ? "通知未启用（已完成同步）" : "未配置渠道（已完成同步）",
-      tokenHealthy: !tokenBroken,
+      tokenHealthy,
       alertsSent: 0,
       channels: [],
     };
@@ -168,22 +152,30 @@ export async function runNotifyForReseller(
   const recycleLines: string[] = [];
   const tokenLines: string[] = [];
 
-  // -- Token/同步告警（状态翻转去重）--
+  // -- Key/同步告警（按云账户状态翻转去重）--
   // 仅凭据/鉴权类失败告警；网络/超时等暂时性错误既不告警也不清除告警记录（状态未知）。
-  const tokenKey = `token:${resellerId}`;
-  if (tokenBroken) {
-    if (!sentKeys.has(tokenKey)) {
+  for (const account of accountSync) {
+    const tokenKey = `token:${account.apiTokenId}`;
+    if (account.tokenBroken && !sentKeys.has(tokenKey)) {
       tokenLines.push(
-        `⚠ 接入凭据校验失败，服务器同步已停摆${syncErrorMsg ? `（${syncErrorMsg}）` : ""}。请尽快到「接入配置」重新填写并校验凭据，否则面板数据将持续过期。`,
+        `⚠ 云账户「${account.accountName}」接入凭据校验失败，服务器同步已停摆` +
+          `${account.error ? `（${account.error}）` : ""}。请尽快到「接入配置」重新填写并校验 Key。`,
       );
       newKeys.push({ key: tokenKey, kind: "token" });
-    }
-  } else if (syncOk) {
-    // 恢复健康：清除旧的 token 告警记录，使下次失效可再次告警
-    if (sentKeys.has(tokenKey)) {
+    } else if (account.ok && account.complete && sentKeys.has(tokenKey)) {
+      // 该账户恢复健康：清除旧告警，使下次失效可再次告警
       await prisma.notificationLog
         .deleteMany({ where: { resellerId, dedupKey: tokenKey } })
         .catch(() => void 0);
+    }
+  }
+
+  // 完全未配置账户时保留一个代理商维度告警。
+  if (accountSync.length === 0) {
+    const noAccountKey = `token:none:${resellerId}`;
+    if (!sentKeys.has(noAccountKey)) {
+      tokenLines.push("⚠ 尚未配置任何云账户，服务器无法自动同步。请前往「接入配置」添加 OpenAPI Key。");
+      newKeys.push({ key: noAccountKey, kind: "token" });
     }
   }
 
@@ -208,10 +200,10 @@ export async function runNotifyForReseller(
     await prisma.resellerNotifyConfig
       .update({
         where: { resellerId },
-        data: { lastRunAt: now, lastError: syncOk ? null : `同步失败（暂时性）：${syncErrorMsg ?? ""}`.slice(0, 480) },
+        data: { lastRunAt: now, lastError: syncOk ? null : `同步异常：${syncErrorMsg ?? ""}`.slice(0, 480) },
       })
       .catch(() => void 0);
-    return { resellerId, tokenHealthy: !tokenBroken, alertsSent: 0, channels: [] };
+    return { resellerId, tokenHealthy, alertsSent: 0, channels: [] };
   }
 
   // ===== 3) 组装消息并发送 =====
@@ -263,7 +255,7 @@ export async function runNotifyForReseller(
 
   return {
     resellerId,
-    tokenHealthy: !tokenBroken,
+    tokenHealthy,
     alertsSent: ok ? newKeys.length : 0,
     channels,
     error: ok ? undefined : errText || "发送失败",

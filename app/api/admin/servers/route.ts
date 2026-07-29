@@ -17,6 +17,9 @@ export async function GET() {
     const servers = await prisma.serverCache.findMany({
       where: { resellerId: user.id },
       orderBy: { createdAt: "desc" },
+      include: {
+        apiToken: { select: { id: true, accountName: true } },
+      },
     });
 
     const assignments = await prisma.serverAssignment.findMany({
@@ -47,6 +50,8 @@ export async function GET() {
         ecsPendingStatus: s.ecsPendingStatus,
         expireTime: s.expireTime,
         lastSyncedAt: s.lastSyncedAt,
+        sourceAccountId: s.apiToken?.id ?? null,
+        sourceAccountName: s.apiToken?.accountName ?? null,
         assigned: !!a,
         assignedCustomerId: a?.customerId ?? null,
         assignedCustomerName: a?.customer.displayName ?? null,

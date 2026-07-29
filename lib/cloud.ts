@@ -46,11 +46,23 @@ export function isAllowedApiPath(path: string, method: "GET" | "POST"): boolean 
  * 取出代理商当前生效接入凭据（明文）。仅供本模块内部使用。
  * 若凭据不存在或解密失败，抛出明确错误。
  */
-async function getResellerPlainToken(resellerId: string): Promise<string> {
-  const row = await prisma.resellerApiToken.findUnique({
-    where: { resellerId },
+async function getResellerPlainToken(
+  resellerId: string,
+  apiTokenId?: string,
+  allowInvalid = false,
+): Promise<string> {
+  const row = await prisma.resellerApiToken.findFirst({
+    where: {
+      resellerId,
+      ...(apiTokenId ? { id: apiTokenId } : {}),
+    },
+    orderBy: { createdAt: "asc" },
   });
-  if (!row || row.status !== "active") {
+  if (
+    !row ||
+    row.status === "revoked" ||
+    (!allowInvalid && row.status !== "active")
+  ) {
     throw new CloudApiError("尚未配置 API 接入凭据或凭据已停用", {
       code: "TOKEN_NOT_CONFIGURED",
       httpStatus: 400,
@@ -84,6 +96,10 @@ export async function cloudRequest<T = unknown>(
     body?: Record<string, unknown>;
     // 调用方可覆盖超时
     timeoutMs?: number;
+    // 多账户场景必须传入服务器/同步任务对应的云账户凭据
+    apiTokenId?: string;
+    // 仅校验/重试流程使用：允许读取 status=invalid 的密文再次验证
+    allowInvalidToken?: boolean;
   } = {},
 ): Promise<T> {
   const method = opts.method ?? "GET";
@@ -93,7 +109,11 @@ export async function cloudRequest<T = unknown>(
       httpStatus: 400,
     });
   }
-  const token = await getResellerPlainToken(resellerId);
+  const token = await getResellerPlainToken(
+    resellerId,
+    opts.apiTokenId,
+    opts.allowInvalidToken,
+  );
 
   const url = new URL(env.PROVIDER_API_BASE + path);
   if (opts.query) {
@@ -223,11 +243,18 @@ export interface InstanceListItem {
 }
 
 /** 拉取所有区域 + 可用区。/region/list 返回 { regions: [...] }。 */
-export async function listRegions(resellerId: string): Promise<RegionItem[]> {
+export async function listRegions(
+  resellerId: string,
+  opts?: { apiTokenId?: string; allowInvalidToken?: boolean },
+): Promise<RegionItem[]> {
   const data = await cloudRequest<{ regions?: RegionItem[] }>(
     resellerId,
     "/region/list",
-    { method: "GET" },
+    {
+      method: "GET",
+      apiTokenId: opts?.apiTokenId,
+      allowInvalidToken: opts?.allowInvalidToken,
+    },
   );
   const arr = data?.regions ?? [];
   return arr.filter((r) => r && r.regionCode && Array.isArray(r.zones));
@@ -278,6 +305,7 @@ async function fetchZoneInstances(
   resellerId: string,
   region: string,
   zone: string,
+  opts?: { apiTokenId?: string; allowInvalidToken?: boolean },
 ): Promise<InstanceListItem[]> {
   const all: InstanceListItem[] = [];
   for (let page = 1; page <= ZONE_MAX_PAGES; page++) {
@@ -293,6 +321,8 @@ async function fetchZoneInstances(
           pageSize: ZONE_PAGE_SIZE,
         },
         timeoutMs: 20000,
+        apiTokenId: opts?.apiTokenId,
+        allowInvalidToken: opts?.allowInvalidToken,
       },
     );
     const arr = d.instances ?? [];
@@ -319,9 +349,14 @@ export async function listInstancesDetailed(
     // 额外并入的“已知地域”（来自 reseller_known_zones 表）。用于覆盖已从
     // region/list 下架、但仍有存量机器的地域（如售罄的 sau-jeddah-1）。
     knownZones?: { region: string; zone: string }[];
+    apiTokenId?: string;
+    allowInvalidToken?: boolean;
   },
 ): Promise<InstanceListResult> {
-  const regions = await listRegions(resellerId);
+  const regions = await listRegions(resellerId, {
+    apiTokenId: opts?.apiTokenId,
+    allowInvalidToken: opts?.allowInvalidToken,
+  });
   // 注意：不能因 region/list 为空就直接返回。已售罄下架的地域会从 region/list
   // 消失，但其存量机器仍在运行、instance/list 仍可查到。这类地域靠“已知地域表”
   // 和 EXTRA_SYNC_ZONES 兜底，因此即便 region/list 为空也要继续处理额外地域。
@@ -356,7 +391,10 @@ export async function listInstancesDetailed(
     const batch = tasks.slice(i, i + CONCURRENCY);
     const out = await Promise.all(
       batch.map((t) =>
-        fetchZoneInstances(resellerId, t.region, t.zone).catch(() => {
+        fetchZoneInstances(resellerId, t.region, t.zone, {
+          apiTokenId: opts?.apiTokenId,
+          allowInvalidToken: opts?.allowInvalidToken,
+        }).catch(() => {
           complete = false;
           return [] as InstanceListItem[];
         }),
@@ -378,8 +416,15 @@ export async function listInstancesDetailed(
 }
 
 /** 兼容旧调用方：仅返回实例列表。 */
-export async function listInstances(resellerId: string): Promise<InstanceListItem[]> {
-  const r = await listInstancesDetailed(resellerId);
+export async function listInstances(
+  resellerId: string,
+  opts?: {
+    apiTokenId?: string;
+    allowInvalidToken?: boolean;
+    knownZones?: { region: string; zone: string }[];
+  },
+): Promise<InstanceListItem[]> {
+  const r = await listInstancesDetailed(resellerId, opts);
   return r.instances;
 }
 
@@ -421,7 +466,7 @@ export function zonesFromInstances(instances: InstanceListItem[]): ZoneWithMachi
 export async function getInstanceDetail(
   resellerId: string,
   ecsResourceUUID: string,
-  opts?: { regionCode?: string; zoneCode?: string },
+  opts?: { regionCode?: string; zoneCode?: string; apiTokenId?: string },
 ): Promise<InstanceListItem | null> {
   const data = await cloudRequest<InstanceListItem | { instance?: InstanceListItem } | null>(
     resellerId,
@@ -433,6 +478,7 @@ export async function getInstanceDetail(
         ...(opts?.regionCode ? { regionCode: opts.regionCode } : {}),
         ...(opts?.zoneCode ? { zoneCode: opts.zoneCode } : {}),
       },
+      apiTokenId: opts?.apiTokenId,
     },
   );
   if (!data) return null;
@@ -445,18 +491,24 @@ export async function getInstanceDetail(
 export async function startInstance(
   resellerId: string,
   ecsResourceUUID: string,
-  opts?: { regionCode?: string; zoneCode?: string },
+  opts?: { regionCode?: string; zoneCode?: string; apiTokenId?: string },
 ): Promise<{ asyncTaskUUID?: string; status?: string }> {
   return cloudRequest(resellerId, "/instance/start", {
     method: "POST",
     body: buildInstanceActionBody(ecsResourceUUID, undefined, opts),
+    apiTokenId: opts?.apiTokenId,
   });
 }
 
 export async function stopInstance(
   resellerId: string,
   ecsResourceUUID: string,
-  opts?: { regionCode?: string; zoneCode?: string; force?: boolean },
+  opts?: {
+    regionCode?: string;
+    zoneCode?: string;
+    force?: boolean;
+    apiTokenId?: string;
+  },
 ): Promise<{ asyncTaskUUID?: string; status?: string }> {
   const body = buildInstanceActionBody(ecsResourceUUID, undefined, opts);
   // 强制关机：上游 /instance/stop 的可选参数 forceStop。
@@ -465,17 +517,19 @@ export async function stopInstance(
   return cloudRequest(resellerId, "/instance/stop", {
     method: "POST",
     body,
+    apiTokenId: opts?.apiTokenId,
   });
 }
 
 export async function restartInstance(
   resellerId: string,
   ecsResourceUUID: string,
-  opts?: { regionCode?: string; zoneCode?: string },
+  opts?: { regionCode?: string; zoneCode?: string; apiTokenId?: string },
 ): Promise<{ asyncTaskUUID?: string; status?: string }> {
   return cloudRequest(resellerId, "/instance/restart", {
     method: "POST",
     body: buildInstanceActionBody(ecsResourceUUID, undefined, opts),
+    apiTokenId: opts?.apiTokenId,
   });
 }
 
@@ -483,11 +537,12 @@ export async function modifyInstancePassword(
   resellerId: string,
   ecsResourceUUID: string,
   password: string,
-  opts?: { regionCode?: string; zoneCode?: string },
+  opts?: { regionCode?: string; zoneCode?: string; apiTokenId?: string },
 ): Promise<{ asyncTaskUUID?: string; status?: string }> {
   return cloudRequest(resellerId, "/instance/modifyInstancePassword", {
     method: "POST",
     body: buildInstanceActionBody(ecsResourceUUID, password, opts),
+    apiTokenId: opts?.apiTokenId,
   });
 }
 
@@ -540,7 +595,13 @@ function isBrandImage(i: ImageItem): boolean {
  */
 export async function listImages(
   resellerId: string,
-  opts?: { regionCode?: string; imageType?: string; page?: number; pageSize?: number },
+  opts?: {
+    regionCode?: string;
+    imageType?: string;
+    page?: number;
+    pageSize?: number;
+    apiTokenId?: string;
+  },
 ): Promise<ImageItem[]> {
   const data = await cloudRequest<{ images?: ImageItem[] }>(
     resellerId,
@@ -553,6 +614,7 @@ export async function listImages(
         page: opts?.page ?? 1,
         pageSize: opts?.pageSize ?? 50,
       },
+      apiTokenId: opts?.apiTokenId,
     },
   );
   return (data?.images ?? []).filter(
@@ -566,7 +628,7 @@ export async function listImages(
  */
 export async function listAllImages(
   resellerId: string,
-  opts: { regionCode?: string; imageType: string },
+  opts: { regionCode?: string; imageType: string; apiTokenId?: string },
 ): Promise<ImageItem[]> {
   const all: ImageItem[] = [];
   const PAGE_SIZE = 50;
@@ -582,6 +644,7 @@ export async function listAllImages(
           page,
           pageSize: PAGE_SIZE,
         },
+        apiTokenId: opts.apiTokenId,
       },
     );
     const raw = (data?.images ?? []).filter((i) => i && i.imageResourceUUID);
@@ -604,6 +667,7 @@ export async function reinstallSystem(
     password: string;
     regionCode: string;
     zoneCode?: string;
+    apiTokenId?: string;
   },
 ): Promise<{ asyncTaskUUID?: string; status?: string }> {
   return cloudRequest(resellerId, "/instance/reinstallSystem", {
@@ -615,6 +679,7 @@ export async function reinstallSystem(
       regionCode: params.regionCode,
       ...(params.zoneCode ? { zoneCode: params.zoneCode } : {}),
     },
+    apiTokenId: params.apiTokenId,
   });
 }
 
@@ -627,9 +692,11 @@ export interface AsyncTaskResult {
 export async function getAsyncTaskResult(
   resellerId: string,
   asyncTaskUUID: string,
+  opts?: { apiTokenId?: string },
 ): Promise<AsyncTaskResult> {
   return cloudRequest<AsyncTaskResult>(resellerId, "/asynctask/getResult", {
     method: "GET",
     query: { asyncTaskUUID },
+    apiTokenId: opts?.apiTokenId,
   });
 }

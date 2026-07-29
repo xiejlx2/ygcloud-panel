@@ -42,6 +42,7 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
       live = await getInstanceDetail(resellerId, ctx.params.uuid, {
         regionCode: cached?.regionCode ?? undefined,
         zoneCode: cached?.zoneCode ?? undefined,
+        apiTokenId: cached?.apiTokenId ?? undefined,
       });
     } catch (e) {
       // 客户可能因为 Token 没配置/网络抖动等情况无法拉到，回退缓存

@@ -64,7 +64,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           ecsResourceUuid: ctx.params.uuid,
         },
       },
-      select: { regionCode: true, zoneCode: true },
+      select: { regionCode: true, zoneCode: true, apiTokenId: true },
     });
     if (!cache?.regionCode) {
       return err("REGION_UNKNOWN", "缺少服务器地域信息，请先在管理端同步服务器", 400);
@@ -75,6 +75,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       password: parsed.data.password,
       regionCode: cache.regionCode,
       zoneCode: cache.zoneCode ?? undefined,
+      apiTokenId: cache.apiTokenId ?? undefined,
     });
     const taskUuid =
       (result?.asyncTaskUUID as string | undefined) ??

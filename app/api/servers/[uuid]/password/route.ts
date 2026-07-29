@@ -51,7 +51,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           ecsResourceUuid: ctx.params.uuid,
         },
       },
-      select: { regionCode: true, zoneCode: true },
+      select: { regionCode: true, zoneCode: true, apiTokenId: true },
     });
     const result = await modifyInstancePassword(
       resellerId,
@@ -60,6 +60,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       {
         regionCode: cache?.regionCode ?? undefined,
         zoneCode: cache?.zoneCode ?? undefined,
+        apiTokenId: cache?.apiTokenId ?? undefined,
       },
     );
     const taskUuid =

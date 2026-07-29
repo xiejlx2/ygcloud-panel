@@ -1,8 +1,8 @@
 /**
  * GET /api/servers/:uuid/images
  *   查询该服务器所在地域的可用系统镜像（供重装系统选择）。
- *   仅代理商主账号可调用：镜像列表只服务于重装系统，
- *   重装权限已从最终客户收回，此接口一并收回以减少暴露面。
+ *   代理商始终可调用；客户仅在被代理商授予 canReinstall 后可调用，
+ *   且仍必须拥有该服务器的有效分配。
  */
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -17,9 +17,15 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
   try {
     const user = await getSession();
     if (!user) return err("UNAUTHORIZED", "未登录", 401);
-    // 与 reinstall 同步收权：客户侧无重装入口，镜像列表也不再开放
+    // 与 reinstall 使用同一授权规则，避免“按钮已开放但镜像列表 403”。
     if (user.role !== "reseller_admin") {
-      return err("FORBIDDEN", "仅管理员可查询镜像列表", 403);
+      const me = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { canReinstall: true },
+      });
+      if (!me?.canReinstall) {
+        return err("FORBIDDEN", "重装系统未对你开放", 403);
+      }
     }
     await assertCanAccessServer(user, ctx.params.uuid);
 
@@ -32,14 +38,22 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
           ecsResourceUuid: ctx.params.uuid,
         },
       },
-      select: { regionCode: true },
+      select: { regionCode: true, apiTokenId: true },
     });
 
     const regionCode = cache?.regionCode ?? undefined;
     // 标准镜像 + 应用镜像都拉进来（品牌镜像已在 listAllImages 内强制屏蔽）
     const [system, application] = await Promise.all([
-      listAllImages(resellerId, { regionCode, imageType: "System" }),
-      listAllImages(resellerId, { regionCode, imageType: "Application" }),
+      listAllImages(resellerId, {
+        regionCode,
+        imageType: "System",
+        apiTokenId: cache?.apiTokenId ?? undefined,
+      }),
+      listAllImages(resellerId, {
+        regionCode,
+        imageType: "Application",
+        apiTokenId: cache?.apiTokenId ?? undefined,
+      }),
     ]);
 
     const toItem = (i: (typeof system)[number], fallbackType: string) => ({

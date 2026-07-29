@@ -41,6 +41,7 @@ interface Server {
   osVersionDetail: string | null;
   ecsStatus: string | null;
   expireTime: string | null;
+  sourceAccountName: string | null;
   assigned: boolean;
   assignedCustomerId: string | null;
   assignedCustomerName: string | null;
@@ -105,7 +106,7 @@ export default function AdminServersPage() {
     let list = items;
     if (kw) {
       list = list.filter((s) =>
-        [s.instanceName, s.customerAlias, s.customerNote, s.publicIpAddress, s.ecsResourceUUID, s.regionName, s.assignedCustomerName]
+        [s.instanceName, s.customerAlias, s.customerNote, s.publicIpAddress, s.ecsResourceUUID, s.regionName, s.sourceAccountName, s.assignedCustomerName]
           .filter(Boolean)
           .some((v) => String(v).toLowerCase().includes(kw)),
       );
@@ -142,11 +143,20 @@ export default function AdminServersPage() {
   async function sync() {
     setSyncing(true);
     try {
-      const r = await api<{ upserted: number; total: number }>(
+      const r = await api<{
+        upserted: number;
+        total: number;
+        accountsSucceeded: number;
+        accountsTotal: number;
+        warnings: string[];
+      }>(
         "/api/admin/servers/sync",
         { method: "POST" },
       );
-      toast.success(`同步完成：共 ${r.total} 台，更新 ${r.upserted} 台`);
+      toast.success(
+        `同步完成：${r.accountsSucceeded}/${r.accountsTotal} 个账户，共 ${r.total} 台，更新 ${r.upserted} 台`,
+      );
+      if (r.warnings.length > 0) toast.error(r.warnings.join("；"));
       mutate();
     } catch (e) {
       toast.error((e as ApiError).message || "同步失败");
@@ -171,10 +181,12 @@ export default function AdminServersPage() {
         zonesTotal: number;
         zonesAdded: number;
         machines: number;
+        warnings: string[];
       }>("/api/admin/zones/refresh", { method: "POST" });
       toast.success(
         `地域库已更新：覆盖 ${r.zonesTotal} 个地域（新增 ${r.zonesAdded}），共 ${r.machines} 台机器`,
       );
+      if (r.warnings.length > 0) toast.error(r.warnings.join("；"));
       mutate();
     } catch (e) {
       toast.error((e as ApiError).message || "更新地域库失败");
@@ -405,6 +417,11 @@ export default function AdminServersPage() {
                       {s.regionName || "—"}
                       {s.osVersionDetail ? ` · ${s.osVersionDetail}` : ""}
                     </div>
+                    {s.sourceAccountName && (
+                      <div className="mt-1 text-xs text-brand-700">
+                        云账户：{s.sourceAccountName}
+                      </div>
+                    )}
                   </td>
 
                   {/* 状态 */}
