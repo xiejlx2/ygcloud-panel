@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { api } from "@/components/Api";
@@ -16,6 +16,7 @@ import { ServerActionButtons } from "@/components/ServerActionButtons";
 import { PageHeader } from "@/components/PageHeader";
 import { TableSkeleton } from "@/components/Skeleton";
 import { EmptyState } from "@/components/EmptyState";
+import { Pagination } from "@/components/Pagination";
 import { IconServer, IconAlert } from "@/components/Icons";
 import { getExpiryInfo } from "@/lib/expiry";
 
@@ -36,6 +37,7 @@ interface Server {
 }
 
 const COLS = 5;
+const PAGE_SIZE = 10;
 
 export default function ClientServersPage() {
   const { data, error, isLoading, mutate } = useSWR<{ items: Server[] }>(
@@ -47,6 +49,7 @@ export default function ClientServersPage() {
   const items = useMemo(() => data?.items ?? [], [data]);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [expireSort, setExpireSort] = useState<SortDir>(null);
+  const [page, setPage] = useState(1);
 
   // 状态筛选选项：由当前数据里实际出现的状态动态生成
   const statusOptions = useMemo(() => {
@@ -72,6 +75,25 @@ export default function ClientServersPage() {
     }
     return list;
   }, [items, statusFilter, expireSort]);
+
+  const totalPages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageItems = useMemo(
+    () =>
+      shown.slice(
+        (currentPage - 1) * PAGE_SIZE,
+        currentPage * PAGE_SIZE,
+      ),
+    [shown, currentPage],
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter, expireSort]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   // 到期/回收站统计（回收站机器仍在列表中展示，销毁前可续费恢复）
   const expiringCount = items.filter(
@@ -150,7 +172,7 @@ export default function ClientServersPage() {
                   </td>
                 </tr>
               )}
-              {shown.map((s) => (
+              {pageItems.map((s) => (
                 <tr key={s.ecsResourceUUID}>
                   <td>
                     <Link
@@ -213,6 +235,12 @@ export default function ClientServersPage() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          page={currentPage}
+          totalItems={shown.length}
+          pageSize={PAGE_SIZE}
+          onPageChange={setPage}
+        />
       </div>
     </div>
   );

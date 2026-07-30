@@ -17,6 +17,7 @@ import { AssignDialog } from "@/components/AssignDialog";
 import { PageHeader } from "@/components/PageHeader";
 import { TableSkeleton } from "@/components/Skeleton";
 import { EmptyState } from "@/components/EmptyState";
+import { Pagination } from "@/components/Pagination";
 import { useToast } from "@/components/Toast";
 import { useConfirm } from "@/components/ConfirmDialog";
 import {
@@ -48,6 +49,7 @@ interface Server {
 }
 
 const COLS = 7;
+const PAGE_SIZE = 10;
 
 // 到期状态快捷筛选：expiring=7天内到期；recycled=回收站（含已过销毁时间待清理的）
 type ExpiryFilter = "expiring" | "recycled" | null;
@@ -73,6 +75,7 @@ export default function AdminServersPage() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [expireSort, setExpireSort] = useState<SortDir>(null);
   const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>(null);
+  const [page, setPage] = useState(1);
 
   // 支持从概览页统计卡跳转：/admin/servers?expiry=expiring|recycled
   useEffect(() => {
@@ -130,6 +133,25 @@ export default function AdminServersPage() {
     }
     return list;
   }, [items, q, statusFilter, expiryFilter, expireSort]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageItems = useMemo(
+    () =>
+      filtered.slice(
+        (currentPage - 1) * PAGE_SIZE,
+        currentPage * PAGE_SIZE,
+      ),
+    [filtered, currentPage],
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [q, statusFilter, expiryFilter, expireSort]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   function toggle(uuid: string) {
     setSelected((prev) => {
@@ -212,9 +234,9 @@ export default function AdminServersPage() {
     }
   }
 
-  const filteredUuids = filtered.map((i) => i.ecsResourceUUID);
+  const pageUuids = pageItems.map((i) => i.ecsResourceUUID);
   const allChecked =
-    filtered.length > 0 && filteredUuids.every((u) => selected.has(u));
+    pageItems.length > 0 && pageUuids.every((u) => selected.has(u));
 
   return (
     <div className="space-y-5">
@@ -330,8 +352,8 @@ export default function AdminServersPage() {
                     onChange={(e) =>
                       setSelected((prev) => {
                         const next = new Set(prev);
-                        if (e.target.checked) filteredUuids.forEach((u) => next.add(u));
-                        else filteredUuids.forEach((u) => next.delete(u));
+                        if (e.target.checked) pageUuids.forEach((u) => next.add(u));
+                        else pageUuids.forEach((u) => next.delete(u));
                         return next;
                       })
                     }
@@ -376,7 +398,7 @@ export default function AdminServersPage() {
                   </td>
                 </tr>
               )}
-              {filtered.map((s) => (
+              {pageItems.map((s) => (
                 <tr key={s.ecsResourceUUID}>
                   <td>
                     <input
@@ -477,6 +499,12 @@ export default function AdminServersPage() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          page={currentPage}
+          totalItems={filtered.length}
+          pageSize={PAGE_SIZE}
+          onPageChange={setPage}
+        />
       </div>
 
       <AssignDialog

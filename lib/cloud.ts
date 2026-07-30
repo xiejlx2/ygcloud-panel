@@ -268,6 +268,16 @@ export interface InstanceListResult {
    * 不能作为它已被销毁的依据（调用方据此决定是否执行清理类操作）。
    */
   complete: boolean;
+  /** 最终仍拉取失败的地域。用于审计和给管理员精确提示，绝不包含凭据。 */
+  zoneFailures: ZoneFetchFailure[];
+}
+
+export interface ZoneFetchFailure {
+  regionCode: string;
+  zoneCode: string;
+  errorCode: string;
+  message: string;
+  attempts: number;
 }
 
 // /instance/list 上游分页：pageSize 取值范围 1~50、默认仅 10。
@@ -275,6 +285,9 @@ export interface InstanceListResult {
 // 用上限 50 逐页翻，直到取满上游报告的 rowCount 或某页返回不足一页。
 const ZONE_PAGE_SIZE = 50;
 const ZONE_MAX_PAGES = 40; // 安全上限：单可用区最多 2000 台，防异常时无限翻页
+const ZONE_FETCH_CONCURRENCY = 6;
+const ZONE_FETCH_MAX_ATTEMPTS = 3;
+const ZONE_RETRY_BASE_DELAY_MS = 400;
 
 /**
  * 解析 EXTRA_SYNC_ZONES：手动补充的额外同步地域（已从上游 region/list 下架、
@@ -335,6 +348,104 @@ async function fetchZoneInstances(
   return all;
 }
 
+function isRetryableZoneError(error: unknown): boolean {
+  if (!(error instanceof CloudApiError)) return false;
+  if (
+    error.code === "UPSTREAM_TIMEOUT" ||
+    error.code === "UPSTREAM_NETWORK_ERROR"
+  ) {
+    return true;
+  }
+  if (error.code === "UPSTREAM_HTTP_ERROR") {
+    return (
+      error.httpStatus === 408 ||
+      error.httpStatus === 425 ||
+      error.httpStatus === 429 ||
+      error.httpStatus >= 500
+    );
+  }
+  return (
+    error.code === "UPSTREAM_BIZ_ERROR" &&
+    /rate|limit|busy|timeout|temporar|system|internal|service/i.test(
+      error.bizCode ?? "",
+    )
+  );
+}
+
+function zoneFailure(
+  regionCode: string,
+  zoneCode: string,
+  error: unknown,
+  attempts: number,
+): ZoneFetchFailure {
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    regionCode,
+    zoneCode,
+    errorCode:
+      error instanceof CloudApiError
+        ? error.bizCode || error.code
+        : "UNKNOWN_ERROR",
+    message: message.slice(0, 200),
+    attempts,
+  };
+}
+
+async function waitForZoneRetry(attempt: number): Promise<void> {
+  const delay =
+    ZONE_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1) +
+    Math.floor(Math.random() * 200);
+  await new Promise((resolve) => setTimeout(resolve, delay));
+}
+
+/**
+ * 地域级有限重试。每次重试都从该地域第 1 页重新拉取，避免分页中途失败后
+ * 把不完整结果误当成完整结果。
+ */
+async function fetchZoneInstancesWithRetry(
+  resellerId: string,
+  region: string,
+  zone: string,
+  opts?: { apiTokenId?: string; allowInvalidToken?: boolean },
+): Promise<{
+  instances: InstanceListItem[];
+  failure?: ZoneFetchFailure;
+}> {
+  for (let attempt = 1; attempt <= ZONE_FETCH_MAX_ATTEMPTS; attempt++) {
+    try {
+      return {
+        instances: await fetchZoneInstances(
+          resellerId,
+          region,
+          zone,
+          opts,
+        ),
+      };
+    } catch (error) {
+      const shouldRetry =
+        attempt < ZONE_FETCH_MAX_ATTEMPTS && isRetryableZoneError(error);
+      if (!shouldRetry) {
+        return {
+          instances: [],
+          failure: zoneFailure(region, zone, error, attempt),
+        };
+      }
+      await waitForZoneRetry(attempt);
+    }
+  }
+
+  // 循环内必定返回；保留防御分支，避免未来调整重试次数时静默返回完整状态。
+  return {
+    instances: [],
+    failure: zoneFailure(
+      region,
+      zone,
+      new Error("地域拉取重试次数配置无效"),
+      0,
+    ),
+  };
+}
+
 /**
  * 拉取代理商名下所有服务器（含完整性标记）。
  * 上游 /instance/list 要求必传 regionCode + zoneCode，所以必须先拉 region 列表，
@@ -380,27 +491,27 @@ export async function listInstancesDetailed(
   for (const kz of opts?.knownZones ?? []) addZone(kz.region, kz.zone);
   for (const ez of parseExtraZones()) addZone(ez.region, ez.zone);
 
-  if (tasks.length === 0) return { instances: [], complete: true };
+  if (tasks.length === 0) {
+    return { instances: [], complete: true, zoneFailures: [] };
+  }
 
-  // 并发拉取：地域多（几十个）时并发过低会明显拖慢，过高会触发上游限流。
-  // 折中取 12——多数地域无机器、单次往返即返回，实测足够快且稳。
-  const CONCURRENCY = 12;
-  let complete = true;
+  // 控制并发并对瞬时错误做地域级重试，降低上游限流/网络抖动造成的部分失败。
   const results: InstanceListItem[][] = [];
-  for (let i = 0; i < tasks.length; i += CONCURRENCY) {
-    const batch = tasks.slice(i, i + CONCURRENCY);
+  const zoneFailures: ZoneFetchFailure[] = [];
+  for (let i = 0; i < tasks.length; i += ZONE_FETCH_CONCURRENCY) {
+    const batch = tasks.slice(i, i + ZONE_FETCH_CONCURRENCY);
     const out = await Promise.all(
       batch.map((t) =>
-        fetchZoneInstances(resellerId, t.region, t.zone, {
+        fetchZoneInstancesWithRetry(resellerId, t.region, t.zone, {
           apiTokenId: opts?.apiTokenId,
           allowInvalidToken: opts?.allowInvalidToken,
-        }).catch(() => {
-          complete = false;
-          return [] as InstanceListItem[];
         }),
       ),
     );
-    for (const arr of out) results.push(arr);
+    for (const result of out) {
+      results.push(result.instances);
+      if (result.failure) zoneFailures.push(result.failure);
+    }
   }
 
   // 按 ecsResourceUUID 去重（保险）
@@ -412,7 +523,11 @@ export async function listInstancesDetailed(
     seen.add(it.ecsResourceUUID);
     merged.push(it);
   }
-  return { instances: merged, complete };
+  return {
+    instances: merged,
+    complete: zoneFailures.length === 0,
+    zoneFailures,
+  };
 }
 
 /** 兼容旧调用方：仅返回实例列表。 */

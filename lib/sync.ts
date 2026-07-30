@@ -9,6 +9,7 @@ import {
   CloudApiError,
   listInstancesDetailed,
   type InstanceListItem,
+  type ZoneFetchFailure,
 } from "@/lib/cloud";
 
 export interface SyncWriteResult {
@@ -23,7 +24,20 @@ export interface CloudAccountSyncResult extends SyncWriteResult {
   ok: boolean;
   complete: boolean;
   tokenBroken: boolean;
+  zoneFailures: ZoneFetchFailure[];
   error?: string;
+}
+
+/** 将失败地域压缩为适合提示框展示的安全摘要。 */
+export function summarizeZoneFailures(
+  failures: ZoneFetchFailure[],
+  limit = 3,
+): string {
+  const shown = failures
+    .slice(0, limit)
+    .map((f) => `${f.regionCode}/${f.zoneCode}（${f.errorCode}）`);
+  const remaining = failures.length - shown.length;
+  return `${shown.join("、")}${remaining > 0 ? `，另有 ${remaining} 个地域` : ""}`;
 }
 
 /**
@@ -170,11 +184,12 @@ export async function syncAllServerCaches(
   for (const account of accounts) {
     try {
       const knownZones = await getKnownZones(resellerId, account.id);
-      const { instances, complete } = await listInstancesDetailed(resellerId, {
-        apiTokenId: account.id,
-        allowInvalidToken: true,
-        knownZones,
-      });
+      const { instances, complete, zoneFailures } =
+        await listInstancesDetailed(resellerId, {
+          apiTokenId: account.id,
+          allowInvalidToken: true,
+          knownZones,
+        });
       const written = await syncServerCache(
         resellerId,
         account.id,
@@ -196,6 +211,7 @@ export async function syncAllServerCaches(
         ok: true,
         complete,
         tokenBroken: false,
+        zoneFailures,
         ...written,
       });
     } catch (e) {
@@ -214,6 +230,7 @@ export async function syncAllServerCaches(
         ok: false,
         complete: false,
         tokenBroken,
+        zoneFailures: [],
         total: 0,
         upserted: 0,
         purged: [],

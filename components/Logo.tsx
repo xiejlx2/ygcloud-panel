@@ -12,20 +12,28 @@ export function LogoMark({
   logoDataUrl?: string | null;
 }) {
   if (logoDataUrl) {
-    // eslint-disable-next-line @next/next/no-img-element
     return (
-      <img
-        src={logoDataUrl}
-        alt=""
-        className={`${className} rounded-lg object-contain`}
+      <span
+        className={`${className} inline-flex shrink-0 overflow-hidden rounded-lg`}
         aria-hidden="true"
-      />
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={logoDataUrl}
+          alt=""
+          className="block h-full w-full max-w-full object-contain"
+        />
+      </span>
     );
   }
   // 渐变色走品牌 CSS 变量：配置主题色后默认图标也跟随品牌色。
   // 图形 = 层叠菱形（layers）：上层实心 + 两道渐隐层线，寓意云基础设施/服务器栈。
   return (
-    <svg viewBox="0 0 32 32" className={className} aria-hidden="true">
+    <svg
+      viewBox="0 0 32 32"
+      className={`${className} shrink-0`}
+      aria-hidden="true"
+    >
       <defs>
         <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="rgb(var(--brand-500))" />
@@ -68,14 +76,18 @@ export function Logo({
   subtitle?: string | null;
 }) {
   return (
-    <div className={`flex items-center gap-2.5 ${className}`}>
+    <div
+      className={`flex min-w-0 max-w-full items-center gap-2.5 overflow-hidden ${className}`}
+    >
       <LogoMark className="h-8 w-8 shrink-0" logoDataUrl={logoDataUrl} />
-      <div className="leading-tight">
-        <div className="text-[15px] font-semibold tracking-tight text-slate-900">
+      <div className="min-w-0 leading-tight">
+        <div className="truncate text-[15px] font-semibold tracking-tight text-slate-900">
           {name}
         </div>
         {subtitle && (
-          <div className="text-[11px] font-medium text-slate-400">{subtitle}</div>
+          <div className="truncate text-[11px] font-medium text-slate-400">
+            {subtitle}
+          </div>
         )}
       </div>
     </div>

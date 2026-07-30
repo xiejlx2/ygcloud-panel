@@ -154,7 +154,7 @@ export default function AdminBrandingPage() {
               效果预览
             </div>
             <div
-              className="flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-slate-200 bg-slate-50/60 py-8"
+              className="flex w-full flex-col items-center justify-center gap-4 overflow-hidden rounded-xl border border-dashed border-slate-200 bg-slate-50/60 px-4 py-8"
               style={previewVars}
             >
               <Logo name={previewName} logoDataUrl={previewLogo} subtitle={previewSubtitle} />

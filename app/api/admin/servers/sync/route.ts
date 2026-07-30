@@ -8,7 +8,10 @@
 import { NextRequest } from "next/server";
 import { getSession } from "@/lib/auth";
 import { assertIsResellerAdmin } from "@/lib/permissions";
-import { syncAllServerCaches } from "@/lib/sync";
+import {
+  summarizeZoneFailures,
+  syncAllServerCaches,
+} from "@/lib/sync";
 import { ok, err, handleError, getRequestIp, getUserAgent } from "@/lib/api";
 import { rateLimit, RL } from "@/lib/ratelimit";
 import { writeAudit } from "@/lib/audit";
@@ -65,6 +68,7 @@ export async function POST(req: NextRequest) {
           name: a.accountName,
           ok: a.ok,
           complete: a.complete,
+          zoneFailures: a.zoneFailures,
           error: a.error,
         })),
       },
@@ -83,7 +87,7 @@ export async function POST(req: NextRequest) {
         .filter((a) => !a.ok || !a.complete)
         .map((a) =>
           a.ok
-            ? `${a.accountName}：部分地域拉取失败，本次未执行销毁清理`
+            ? `${a.accountName}：部分地域拉取失败（${summarizeZoneFailures(a.zoneFailures)}），本次未执行销毁清理`
             : `${a.accountName}：${a.error}`,
         ),
       syncedAt: now,

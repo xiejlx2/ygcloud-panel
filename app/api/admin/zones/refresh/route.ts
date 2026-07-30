@@ -14,10 +14,15 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
 import { assertIsResellerAdmin } from "@/lib/permissions";
-import { listInstancesDetailed, zonesFromInstances } from "@/lib/cloud";
+import {
+  listInstancesDetailed,
+  zonesFromInstances,
+  type ZoneFetchFailure,
+} from "@/lib/cloud";
 import {
   getKnownZones,
   isCloudAccountCredentialError,
+  summarizeZoneFailures,
   syncServerCache,
 } from "@/lib/sync";
 import { ok, err, handleError, getRequestIp, getUserAgent } from "@/lib/api";
@@ -53,17 +58,19 @@ export async function POST(req: NextRequest) {
       total: number;
       upserted: number;
       purged: string[];
+      zoneFailures: ZoneFetchFailure[];
       error?: string;
     }[] = [];
 
     for (const account of accounts) {
       try {
         const knownZones = await getKnownZones(user.id, account.id);
-        const { instances, complete } = await listInstancesDetailed(user.id, {
-          apiTokenId: account.id,
-          allowInvalidToken: true,
-          knownZones,
-        });
+        const { instances, complete, zoneFailures } =
+          await listInstancesDetailed(user.id, {
+            apiTokenId: account.id,
+            allowInvalidToken: true,
+            knownZones,
+          });
         const written = await syncServerCache(
           user.id,
           account.id,
@@ -124,6 +131,7 @@ export async function POST(req: NextRequest) {
           name: account.accountName,
           ok: true,
           complete,
+          zoneFailures,
           zones: complete ? zones.length : 0,
           added,
           ...written,
@@ -142,6 +150,7 @@ export async function POST(req: NextRequest) {
           name: account.accountName,
           ok: false,
           complete: false,
+          zoneFailures: [],
           zones: 0,
           added: 0,
           total: 0,
@@ -169,7 +178,7 @@ export async function POST(req: NextRequest) {
       .filter((r) => !r.ok || !r.complete)
       .map((r) =>
         r.ok
-          ? `${r.name}：部分地域拉取失败，未更新该账户地域库`
+          ? `${r.name}：部分地域拉取失败（${summarizeZoneFailures(r.zoneFailures)}），未更新该账户地域库`
           : `${r.name}：${r.error}`,
       );
 
