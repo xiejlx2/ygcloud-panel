@@ -28,11 +28,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           ecsResourceUuid: ctx.params.uuid,
         },
       },
-      select: { regionCode: true, zoneCode: true },
+      select: { regionCode: true, zoneCode: true, apiTokenId: true },
     });
     const result = await restartInstance(resellerId, ctx.params.uuid, {
       regionCode: cache?.regionCode ?? undefined,
       zoneCode: cache?.zoneCode ?? undefined,
+      apiTokenId: cache?.apiTokenId ?? undefined,
     });
     const taskUuid =
       (result?.asyncTaskUUID as string | undefined) ??

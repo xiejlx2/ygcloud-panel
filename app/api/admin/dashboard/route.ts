@@ -13,7 +13,7 @@ export async function GET() {
     const user = await getSession();
     assertIsResellerAdmin(user);
 
-    const [totalServers, assignedServers, customerCount, token, lastLog, expireRows] =
+    const [totalServers, assignedServers, customerCount, tokens, lastLog, expireRows] =
       await Promise.all([
         prisma.serverCache.count({ where: { resellerId: user.id } }),
         prisma.serverAssignment.count({
@@ -22,13 +22,11 @@ export async function GET() {
         prisma.user.count({
           where: { parentId: user.id, role: "customer" },
         }),
-        prisma.resellerApiToken.findUnique({
-          where: { resellerId: user.id },
+        prisma.resellerApiToken.findMany({
+          where: { resellerId: user.id, status: { not: "revoked" } },
           select: {
             status: true,
-            tokenSuffix: true,
             lastVerifiedAt: true,
-            tokenKeyHint: true,
           },
         }),
         prisma.operationLog.findFirst({
@@ -77,14 +75,17 @@ export async function GET() {
         recycled,
       },
       customers: customerCount,
-      token: token
-        ? {
-            configured: true,
-            status: token.status,
-            tokenSuffix: token.tokenSuffix,
-            lastVerifiedAt: token.lastVerifiedAt,
-          }
-        : { configured: false },
+      token: {
+        configured: tokens.length > 0,
+        total: tokens.length,
+        active: tokens.filter((t) => t.status === "active").length,
+        invalid: tokens.filter((t) => t.status === "invalid").length,
+        lastVerifiedAt:
+          tokens
+            .map((t) => t.lastVerifiedAt)
+            .filter((v): v is Date => !!v)
+            .sort((a, b) => b.getTime() - a.getTime())[0] ?? null,
+      },
       recentLogs,
     });
   } catch (e) {

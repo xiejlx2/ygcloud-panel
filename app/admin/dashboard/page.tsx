@@ -3,7 +3,6 @@
 import useSWR from "swr";
 import Link from "next/link";
 import { api } from "@/components/Api";
-import { StatusBadge } from "@/components/StatusBadge";
 import { PageHeader } from "@/components/PageHeader";
 import { StatSkeleton, Skeleton } from "@/components/Skeleton";
 import {
@@ -25,9 +24,10 @@ interface Dashboard {
   customers: number;
   token: {
     configured: boolean;
-    status?: string;
-    tokenSuffix?: string;
-    lastVerifiedAt?: string;
+    total: number;
+    active: number;
+    invalid: number;
+    lastVerifiedAt?: string | null;
   };
   recentLogs: { id: string; action: string; createdAt: string; userName: string }[];
 }
@@ -152,11 +152,10 @@ export default function DashboardPage() {
             <Skeleton className="h-5 w-40" />
           ) : data?.token.configured ? (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-slate-600">
-              <span className="inline-flex items-center gap-1.5">
-                状态 <StatusBadge value={data.token.status} />
-              </span>
-              {data.token.tokenSuffix && (
-                <span className="text-slate-400">末 4 位 ****{data.token.tokenSuffix}</span>
+              <span>已接入 {data.token.total} 个云账户</span>
+              <span className="text-emerald-600">正常 {data.token.active}</span>
+              {data.token.invalid > 0 && (
+                <span className="text-red-600">异常 {data.token.invalid}</span>
               )}
               {data.token.lastVerifiedAt && (
                 <span className="text-slate-400">

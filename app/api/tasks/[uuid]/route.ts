@@ -35,7 +35,18 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
 
     // 以日志归属的代理商发起调用，确保用到的 Token 与任务所属租户一致
     const resellerId = log.resellerId;
-    const t = await getAsyncTaskResult(resellerId, ctx.params.uuid);
+    const server = await prisma.serverCache.findUnique({
+      where: {
+        resellerId_ecsResourceUuid: {
+          resellerId,
+          ecsResourceUuid: log.ecsResourceUuid,
+        },
+      },
+      select: { apiTokenId: true },
+    });
+    const t = await getAsyncTaskResult(resellerId, ctx.params.uuid, {
+      apiTokenId: server?.apiTokenId ?? undefined,
+    });
 
     if (log && t.taskStatus) {
       await prisma.operationLog

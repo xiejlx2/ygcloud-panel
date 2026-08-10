@@ -87,39 +87,10 @@ export async function GET(req: NextRequest) {
 
 async function refreshInBackground(
   resellerId: string | null,
-  uuids: string[],
+  _uuids: string[],
 ) {
   if (!resellerId) return;
-  // 仅刷新状态字段（最简实现：调用 listInstances 后批量更新命中项）
-  const { listInstances } = await import("@/lib/cloud");
-  const list = await listInstances(resellerId);
-  const set = new Set(uuids);
-  const now = new Date();
-  for (const it of list) {
-    if (!it.ecsResourceUUID || !set.has(it.ecsResourceUUID)) continue;
-    await prisma.serverCache
-      .update({
-        where: {
-          resellerId_ecsResourceUuid: {
-            resellerId,
-            ecsResourceUuid: it.ecsResourceUUID,
-          },
-        },
-        data: {
-          ecsStatus: it.ecsStatus ?? undefined,
-          ecsPendingStatus: it.ecsPendingStatus ?? undefined,
-          // 到期时间一并刷新：续费后客户侧的到期/回收站提示能及时消除
-          expireTime: parseExpire(it.expireTime),
-          lastSyncedAt: now,
-        },
-      })
-      .catch(() => void 0);
-  }
-}
-
-/** 无效/缺失的到期时间返回 undefined（保持库中原值不动）。 */
-function parseExpire(v?: string): Date | undefined {
-  if (!v) return undefined;
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? undefined : d;
+  // 按账户分别同步，确保每台机器都使用其来源账户的 Key。
+  const { syncAllServerCaches } = await import("@/lib/sync");
+  await syncAllServerCaches(resellerId);
 }

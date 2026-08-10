@@ -17,6 +17,7 @@ import { AssignDialog } from "@/components/AssignDialog";
 import { PageHeader } from "@/components/PageHeader";
 import { TableSkeleton } from "@/components/Skeleton";
 import { EmptyState } from "@/components/EmptyState";
+import { Pagination } from "@/components/Pagination";
 import { useToast } from "@/components/Toast";
 import { useConfirm } from "@/components/ConfirmDialog";
 import {
@@ -41,12 +42,14 @@ interface Server {
   osVersionDetail: string | null;
   ecsStatus: string | null;
   expireTime: string | null;
+  sourceAccountName: string | null;
   assigned: boolean;
   assignedCustomerId: string | null;
   assignedCustomerName: string | null;
 }
 
 const COLS = 7;
+const PAGE_SIZE = 10;
 
 // 到期状态快捷筛选：expiring=7天内到期；recycled=回收站（含已过销毁时间待清理的）
 type ExpiryFilter = "expiring" | "recycled" | null;
@@ -72,6 +75,7 @@ export default function AdminServersPage() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [expireSort, setExpireSort] = useState<SortDir>(null);
   const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>(null);
+  const [page, setPage] = useState(1);
 
   // 支持从概览页统计卡跳转：/admin/servers?expiry=expiring|recycled
   useEffect(() => {
@@ -105,7 +109,7 @@ export default function AdminServersPage() {
     let list = items;
     if (kw) {
       list = list.filter((s) =>
-        [s.instanceName, s.customerAlias, s.customerNote, s.publicIpAddress, s.ecsResourceUUID, s.regionName, s.assignedCustomerName]
+        [s.instanceName, s.customerAlias, s.customerNote, s.publicIpAddress, s.ecsResourceUUID, s.regionName, s.sourceAccountName, s.assignedCustomerName]
           .filter(Boolean)
           .some((v) => String(v).toLowerCase().includes(kw)),
       );
@@ -130,6 +134,25 @@ export default function AdminServersPage() {
     return list;
   }, [items, q, statusFilter, expiryFilter, expireSort]);
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageItems = useMemo(
+    () =>
+      filtered.slice(
+        (currentPage - 1) * PAGE_SIZE,
+        currentPage * PAGE_SIZE,
+      ),
+    [filtered, currentPage],
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [q, statusFilter, expiryFilter, expireSort]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
   function toggle(uuid: string) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -142,11 +165,20 @@ export default function AdminServersPage() {
   async function sync() {
     setSyncing(true);
     try {
-      const r = await api<{ upserted: number; total: number }>(
+      const r = await api<{
+        upserted: number;
+        total: number;
+        accountsSucceeded: number;
+        accountsTotal: number;
+        warnings: string[];
+      }>(
         "/api/admin/servers/sync",
         { method: "POST" },
       );
-      toast.success(`同步完成：共 ${r.total} 台，更新 ${r.upserted} 台`);
+      toast.success(
+        `同步完成：${r.accountsSucceeded}/${r.accountsTotal} 个账户，共 ${r.total} 台，更新 ${r.upserted} 台`,
+      );
+      if (r.warnings.length > 0) toast.error(r.warnings.join("；"));
       mutate();
     } catch (e) {
       toast.error((e as ApiError).message || "同步失败");
@@ -171,10 +203,12 @@ export default function AdminServersPage() {
         zonesTotal: number;
         zonesAdded: number;
         machines: number;
+        warnings: string[];
       }>("/api/admin/zones/refresh", { method: "POST" });
       toast.success(
         `地域库已更新：覆盖 ${r.zonesTotal} 个地域（新增 ${r.zonesAdded}），共 ${r.machines} 台机器`,
       );
+      if (r.warnings.length > 0) toast.error(r.warnings.join("；"));
       mutate();
     } catch (e) {
       toast.error((e as ApiError).message || "更新地域库失败");
@@ -200,9 +234,9 @@ export default function AdminServersPage() {
     }
   }
 
-  const filteredUuids = filtered.map((i) => i.ecsResourceUUID);
+  const pageUuids = pageItems.map((i) => i.ecsResourceUUID);
   const allChecked =
-    filtered.length > 0 && filteredUuids.every((u) => selected.has(u));
+    pageItems.length > 0 && pageUuids.every((u) => selected.has(u));
 
   return (
     <div className="space-y-5">
@@ -318,8 +352,8 @@ export default function AdminServersPage() {
                     onChange={(e) =>
                       setSelected((prev) => {
                         const next = new Set(prev);
-                        if (e.target.checked) filteredUuids.forEach((u) => next.add(u));
-                        else filteredUuids.forEach((u) => next.delete(u));
+                        if (e.target.checked) pageUuids.forEach((u) => next.add(u));
+                        else pageUuids.forEach((u) => next.delete(u));
                         return next;
                       })
                     }
@@ -364,7 +398,7 @@ export default function AdminServersPage() {
                   </td>
                 </tr>
               )}
-              {filtered.map((s) => (
+              {pageItems.map((s) => (
                 <tr key={s.ecsResourceUUID}>
                   <td>
                     <input
@@ -405,6 +439,11 @@ export default function AdminServersPage() {
                       {s.regionName || "—"}
                       {s.osVersionDetail ? ` · ${s.osVersionDetail}` : ""}
                     </div>
+                    {s.sourceAccountName && (
+                      <div className="mt-1 text-xs text-brand-700">
+                        云账户：{s.sourceAccountName}
+                      </div>
+                    )}
                   </td>
 
                   {/* 状态 */}
@@ -460,6 +499,12 @@ export default function AdminServersPage() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          page={currentPage}
+          totalItems={filtered.length}
+          pageSize={PAGE_SIZE}
+          onPageChange={setPage}
+        />
       </div>
 
       <AssignDialog

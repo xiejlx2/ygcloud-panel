@@ -5,12 +5,39 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getExpiryInfo } from "@/lib/expiry";
-import type { InstanceListItem } from "@/lib/cloud";
+import {
+  CloudApiError,
+  listInstancesDetailed,
+  type InstanceListItem,
+  type ZoneFetchFailure,
+} from "@/lib/cloud";
 
 export interface SyncWriteResult {
   total: number;
   upserted: number;
   purged: string[];
+}
+
+export interface CloudAccountSyncResult extends SyncWriteResult {
+  apiTokenId: string;
+  accountName: string;
+  ok: boolean;
+  complete: boolean;
+  tokenBroken: boolean;
+  zoneFailures: ZoneFetchFailure[];
+  error?: string;
+}
+
+/** 将失败地域压缩为适合提示框展示的安全摘要。 */
+export function summarizeZoneFailures(
+  failures: ZoneFetchFailure[],
+  limit = 3,
+): string {
+  const shown = failures
+    .slice(0, limit)
+    .map((f) => `${f.regionCode}/${f.zoneCode}（${f.errorCode}）`);
+  const remaining = failures.length - shown.length;
+  return `${shown.join("、")}${remaining > 0 ? `，另有 ${remaining} 个地域` : ""}`;
 }
 
 /**
@@ -20,6 +47,7 @@ export interface SyncWriteResult {
  */
 export async function syncServerCache(
   resellerId: string,
+  apiTokenId: string,
   instances: InstanceListItem[],
   complete: boolean,
   now: Date = new Date(),
@@ -38,8 +66,8 @@ export async function syncServerCache(
         where: {
           resellerId_ecsResourceUuid: { resellerId, ecsResourceUuid: uuid },
         },
-        create: { resellerId, ecsResourceUuid: uuid, ...payload },
-        update: payload,
+        create: { resellerId, apiTokenId, ecsResourceUuid: uuid, ...payload },
+        update: { apiTokenId, ...payload },
       });
       upserted++;
     }
@@ -48,7 +76,7 @@ export async function syncServerCache(
     // 且本轮上游已不再返回。仅在本轮拉取完整时执行。
     if (complete) {
       const cached = await tx.serverCache.findMany({
-        where: { resellerId },
+        where: { resellerId, apiTokenId },
         select: { ecsResourceUuid: true, expireTime: true },
       });
       purged = cached
@@ -65,7 +93,7 @@ export async function syncServerCache(
           where: { resellerId, ecsResourceUuid: { in: purged } },
         });
         await tx.serverCache.deleteMany({
-          where: { resellerId, ecsResourceUuid: { in: purged } },
+          where: { resellerId, apiTokenId, ecsResourceUuid: { in: purged } },
         });
       }
     }
@@ -116,10 +144,99 @@ function safeJson(it: unknown): string {
 /** 读取某代理商已知地域表，转成 listInstancesDetailed 需要的形态。 */
 export async function getKnownZones(
   resellerId: string,
+  apiTokenId: string,
 ): Promise<{ region: string; zone: string }[]> {
   const rows = await prisma.resellerKnownZone.findMany({
-    where: { resellerId },
+    where: { resellerId, apiTokenId },
     select: { regionCode: true, zoneCode: true },
   });
   return rows.map((r) => ({ region: r.regionCode, zone: r.zoneCode }));
+}
+
+const TOKEN_FAILURE_CODES = new Set([
+  "TOKEN_NOT_CONFIGURED",
+  "TOKEN_DECRYPT_FAILED",
+  "UPSTREAM_HTTP_ERROR",
+  "UPSTREAM_BIZ_ERROR",
+]);
+
+/** 是否属于需要把云账户标记为 invalid 的凭据/鉴权类错误。 */
+export function isCloudAccountCredentialError(e: unknown): boolean {
+  return e instanceof CloudApiError && TOKEN_FAILURE_CODES.has(e.code);
+}
+
+/**
+ * 同步某代理商下的全部云账户。
+ * 每个账户独立拉取、写入和清理：一个账户失败不会阻断其他账户，
+ * 更不会把其他账户未出现在本轮结果中的服务器误判为已销毁。
+ */
+export async function syncAllServerCaches(
+  resellerId: string,
+  now: Date = new Date(),
+): Promise<CloudAccountSyncResult[]> {
+  const accounts = await prisma.resellerApiToken.findMany({
+    where: { resellerId, status: { not: "revoked" } },
+    select: { id: true, accountName: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const results: CloudAccountSyncResult[] = [];
+  for (const account of accounts) {
+    try {
+      const knownZones = await getKnownZones(resellerId, account.id);
+      const { instances, complete, zoneFailures } =
+        await listInstancesDetailed(resellerId, {
+          apiTokenId: account.id,
+          allowInvalidToken: true,
+          knownZones,
+        });
+      const written = await syncServerCache(
+        resellerId,
+        account.id,
+        instances,
+        complete,
+        now,
+      );
+      // 只有完整覆盖所有地域时才确认 Key 健康；部分地域失败时保留原状态，
+      // 避免把权限不完整的 Key 错标为 active。
+      if (complete) {
+        await prisma.resellerApiToken.update({
+          where: { id: account.id },
+          data: { status: "active", lastVerifiedAt: now },
+        });
+      }
+      results.push({
+        apiTokenId: account.id,
+        accountName: account.accountName,
+        ok: true,
+        complete,
+        tokenBroken: false,
+        zoneFailures,
+        ...written,
+      });
+    } catch (e) {
+      const tokenBroken = isCloudAccountCredentialError(e);
+      if (tokenBroken) {
+        await prisma.resellerApiToken
+          .updateMany({
+            where: { id: account.id, resellerId },
+            data: { status: "invalid" },
+          })
+          .catch(() => void 0);
+      }
+      results.push({
+        apiTokenId: account.id,
+        accountName: account.accountName,
+        ok: false,
+        complete: false,
+        tokenBroken,
+        zoneFailures: [],
+        total: 0,
+        upserted: 0,
+        purged: [],
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+  return results;
 }

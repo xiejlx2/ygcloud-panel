@@ -61,8 +61,10 @@ model User {
 // ===== 2. 代理商 API Token（加密存储，绝不出前端）=====
 model ResellerApiToken {
   id             String    @id @default(cuid())
-  resellerId     String    @unique @map("reseller_id")
+  resellerId     String    @map("reseller_id")
   reseller       User      @relation(fields: [resellerId], references: [id], onDelete: Cascade)
+  // 同一代理商可接入多个上游账户；名称仅用于面板内区分
+  accountName    String    @default("默认账户") @map("account_name")
   tokenEncrypted String    @map("token_encrypted")
   // 用于校验密钥是否变化导致无法解密
   tokenKeyHint   String?   @map("token_key_hint")
@@ -74,6 +76,11 @@ model ResellerApiToken {
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
+  serverCache    ServerCache[] @relation("ServerCacheToken")
+  knownZones     ResellerKnownZone[] @relation("KnownZoneToken")
+
+  @@unique([resellerId, accountName])
+  @@index([resellerId])
   @@map("reseller_api_tokens")
 }
 
@@ -87,6 +94,8 @@ model ResellerKnownZone {
   id          String   @id @default(cuid())
   resellerId  String   @map("reseller_id")
   reseller    User     @relation("KnownZoneOwner", fields: [resellerId], references: [id], onDelete: Cascade)
+  apiTokenId  String?  @map("api_token_id")
+  apiToken    ResellerApiToken? @relation("KnownZoneToken", fields: [apiTokenId], references: [id], onDelete: SetNull)
   regionCode  String   @map("region_code")
   regionName  String?  @map("region_name")
   zoneCode    String   @map("zone_code")
@@ -97,8 +106,9 @@ model ResellerKnownZone {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  @@unique([resellerId, regionCode, zoneCode])
+  @@unique([apiTokenId, regionCode, zoneCode])
   @@index([resellerId])
+  @@index([apiTokenId])
   @@map("reseller_known_zones")
 }
 
@@ -107,6 +117,9 @@ model ServerCache {
   id                String    @id @default(cuid())
   resellerId        String    @map("reseller_id")
   reseller          User      @relation("ServerCacheOwner", fields: [resellerId], references: [id], onDelete: Cascade)
+  // 该服务器来自哪个上游账户；所有实时操作必须使用对应账户的 Key
+  apiTokenId        String?   @map("api_token_id")
+  apiToken          ResellerApiToken? @relation("ServerCacheToken", fields: [apiTokenId], references: [id], onDelete: SetNull)
   ecsResourceUuid   String    @map("ecs_resource_uuid")
   instanceName      String?   @map("instance_name")
   publicIpAddress   String?   @map("public_ip_address")
@@ -135,6 +148,7 @@ model ServerCache {
 
   @@unique([resellerId, ecsResourceUuid])
   @@index([resellerId])
+  @@index([apiTokenId])
   @@map("server_cache")
 }
 
