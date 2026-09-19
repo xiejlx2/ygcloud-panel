@@ -243,16 +243,125 @@ export async function getKnownZones(
   return rows.map((r) => ({ region: r.regionCode, zone: r.zoneCode }));
 }
 
-const TOKEN_FAILURE_CODES = new Set([
-  "TOKEN_NOT_CONFIGURED",
-  "TOKEN_DECRYPT_FAILED",
-  "UPSTREAM_HTTP_ERROR",
-  "UPSTREAM_BIZ_ERROR",
-]);
+/** 上游以 HTTP 状态码明确表示“凭据无效 / 无权访问”的取值。 */
+const AUTH_HTTP_STATUSES = new Set([401, 403]);
 
-/** 是否属于需要把云账户标记为 invalid 的凭据/鉴权类错误。 */
+/**
+ * 上游业务层错误里指向凭据/鉴权的错误码或文案关键字。
+ * 只认明确的鉴权语义：限流、系统繁忙、参数错误等一律不算凭据失效。
+ */
+const AUTH_FAILURE_PATTERN =
+  /(token|credential|unauthor|forbidden|access[\s_-]?denied|permission|鉴权|令牌|密钥)/i;
+
+/**
+ * 是否属于需要把云账户标记为 invalid 的凭据/鉴权类错误。
+ *
+ * 判定收紧原因：早期版本把任何 UPSTREAM_HTTP_ERROR / UPSTREAM_BIZ_ERROR 都当成
+ * 凭据失效，导致上游限流（429）、5xx、CDN 抖动等一次暂时性失败就把健康 Key
+ * 标成“无效”。现在只有明确的鉴权失败才允许改状态：
+ *   1) 本地面板侧：未配置凭据 / 密文解密失败；
+ *   2) 上游 HTTP 401 / 403；
+ *   3) 上游业务错误码或文案明确指向 token / 鉴权 / 权限。
+ * 其余错误（超时、网络、5xx、429、部分地域失败）只影响本轮同步完整性，不改 Key 状态。
+ */
 export function isCloudAccountCredentialError(e: unknown): boolean {
-  return e instanceof CloudApiError && TOKEN_FAILURE_CODES.has(e.code);
+  if (!(e instanceof CloudApiError)) return false;
+  if (e.code === "TOKEN_NOT_CONFIGURED" || e.code === "TOKEN_DECRYPT_FAILED") {
+    return true;
+  }
+  if (e.code !== "UPSTREAM_HTTP_ERROR" && e.code !== "UPSTREAM_BIZ_ERROR") {
+    return false;
+  }
+  if (e.code === "UPSTREAM_HTTP_ERROR" && AUTH_HTTP_STATUSES.has(e.httpStatus)) {
+    return true;
+  }
+  return AUTH_FAILURE_PATTERN.test(`${e.bizCode ?? ""} ${e.message}`);
+}
+
+/**
+ * 云账户状态变化留痕。
+ *
+ * 后台/定时同步（客户页静默刷新、每小时任务）没有登录用户，
+ * 早期版本改状态时完全不写日志，出问题无法追溯。这里统一落一条
+ * operation_logs（以代理商本人作为日志归属，符合表结构外键约束）。
+ * 留痕失败不影响同步主流程。
+ */
+export async function logCloudAccountStatusChange(params: {
+  resellerId: string;
+  accountId: string;
+  accountName: string;
+  from: string;
+  to: string;
+  trigger: string;
+  detail?: string;
+}): Promise<void> {
+  try {
+    const owner = await prisma.user.findUnique({
+      where: { id: params.resellerId },
+      select: { role: true },
+    });
+    if (!owner) return;
+    await prisma.operationLog.create({
+      data: {
+        resellerId: params.resellerId,
+        userId: params.resellerId,
+        userRole: owner.role,
+        ecsResourceUuid: "-",
+        action: "cloud_account_status",
+        // 判为失效时把原因写进 errMsg，操作日志页「错误」列可直接看到原因。
+        errMsg: params.to === "invalid" ? (params.detail ?? null) : null,
+        requestPayload: JSON.stringify({
+          accountId: params.accountId,
+          accountName: params.accountName,
+          from: params.from,
+          to: params.to,
+          trigger: params.trigger,
+          detail: params.detail?.slice(0, 300) ?? null,
+        }),
+      },
+    });
+  } catch {
+    // 留痕是旁路能力，失败不能影响同步结果。
+  }
+}
+
+/** 同一代理商的“同步不完整”日志最多每小时写一条，避免客户页轮询刷爆日志。 */
+const SYNC_INCOMPLETE_LOG_INTERVAL_MS = 60 * 60 * 1000;
+
+async function logIncompleteSync(
+  resellerId: string,
+  summary: string,
+  payload: unknown,
+): Promise<void> {
+  try {
+    const recent = await prisma.operationLog.findFirst({
+      where: {
+        resellerId,
+        action: "sync_incomplete",
+        createdAt: { gte: new Date(Date.now() - SYNC_INCOMPLETE_LOG_INTERVAL_MS) },
+      },
+      select: { id: true },
+    });
+    if (recent) return;
+    const owner = await prisma.user.findUnique({
+      where: { id: resellerId },
+      select: { role: true },
+    });
+    if (!owner) return;
+    await prisma.operationLog.create({
+      data: {
+        resellerId,
+        userId: resellerId,
+        userRole: owner.role,
+        ecsResourceUuid: "-",
+        action: "sync_incomplete",
+        errMsg: summary.slice(0, 300),
+        requestPayload: JSON.stringify(payload).slice(0, 4000),
+      },
+    });
+  } catch {
+    // 同上：日志写入失败不影响同步。
+  }
 }
 
 /**
@@ -266,7 +375,7 @@ export async function syncAllServerCaches(
 ): Promise<CloudAccountSyncResult[]> {
   const accounts = await prisma.resellerApiToken.findMany({
     where: { resellerId, status: { not: "revoked" } },
-    select: { id: true, accountName: true },
+    select: { id: true, accountName: true, status: true },
     orderBy: { createdAt: "asc" },
   });
 
@@ -294,6 +403,18 @@ export async function syncAllServerCaches(
           where: { id: account.id },
           data: { status: "active", lastVerifiedAt: now },
         });
+        // 从“无效”恢复为“正常”也要留痕，便于事后核对状态变化。
+        if (account.status === "invalid") {
+          await logCloudAccountStatusChange({
+            resellerId,
+            accountId: account.id,
+            accountName: account.accountName,
+            from: "invalid",
+            to: "active",
+            trigger: "sync",
+            detail: `完整同步成功，共 ${instances.length} 台服务器`,
+          });
+        }
       }
       results.push({
         apiTokenId: account.id,
@@ -307,12 +428,25 @@ export async function syncAllServerCaches(
     } catch (e) {
       const tokenBroken = isCloudAccountCredentialError(e);
       if (tokenBroken) {
-        await prisma.resellerApiToken
+        const message = e instanceof Error ? e.message : String(e);
+        // 只在实际发生状态翻转时写日志（重复失败不重复留痕）。
+        const flipped = await prisma.resellerApiToken
           .updateMany({
-            where: { id: account.id, resellerId },
+            where: { id: account.id, resellerId, status: { not: "invalid" } },
             data: { status: "invalid" },
           })
-          .catch(() => void 0);
+          .catch(() => ({ count: 0 }));
+        if (flipped.count > 0) {
+          await logCloudAccountStatusChange({
+            resellerId,
+            accountId: account.id,
+            accountName: account.accountName,
+            from: account.status,
+            to: "invalid",
+            trigger: "sync",
+            detail: message,
+          });
+        }
       }
       results.push({
         apiTokenId: account.id,
@@ -328,5 +462,31 @@ export async function syncAllServerCaches(
       });
     }
   }
+
+  // 本轮存在失败或拉取不完整时留一条（每小时最多一条）日志：
+  // 客户页静默刷新与定时任务没有登录用户，否则这类异常完全无声。
+  const unhealthy = results.filter((r) => !r.ok || !r.complete);
+  if (unhealthy.length > 0) {
+    await logIncompleteSync(
+      resellerId,
+      unhealthy
+        .map((r) =>
+          r.ok
+            ? `${r.accountName}：部分地域拉取失败（${summarizeZoneFailures(r.zoneFailures)}），本轮未执行销毁清理`
+            : `${r.accountName}：${r.error ?? "同步失败"}`,
+        )
+        .join("；"),
+      unhealthy.map((r) => ({
+        id: r.apiTokenId,
+        name: r.accountName,
+        ok: r.ok,
+        complete: r.complete,
+        tokenBroken: r.tokenBroken,
+        error: r.error,
+        zoneFailures: r.zoneFailures.slice(0, 5),
+      })),
+    );
+  }
+
   return results;
 }

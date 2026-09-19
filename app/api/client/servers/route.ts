@@ -56,7 +56,10 @@ export async function GET(req: NextRequest) {
       stale &&
       rateLimit(`clientRefresh:${user.parentId}`, RL.clientRefresh)
     ) {
-      void refreshInBackground(user.parentId, uuids).catch(() => void 0);
+      void refreshInBackground(user.parentId, uuids).catch((e) => {
+        // 后台刷新失败不阻断客户请求，但要留下服务端日志，便于追溯静默失败。
+        console.error("[client-refresh] 后台同步失败", e);
+      });
     }
 
     return ok({
