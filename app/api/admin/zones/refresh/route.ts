@@ -22,6 +22,7 @@ import {
 import {
   getKnownZones,
   isCloudAccountCredentialError,
+  logCloudAccountStatusChange,
   summarizeZoneFailures,
   syncServerCache,
 } from "@/lib/sync";
@@ -40,7 +41,7 @@ export async function POST(req: NextRequest) {
 
     const accounts = await prisma.resellerApiToken.findMany({
       where: { resellerId: user.id, status: { not: "revoked" } },
-      select: { id: true, accountName: true },
+      select: { id: true, accountName: true, status: true },
       orderBy: { createdAt: "asc" },
     });
     if (accounts.length === 0) {
@@ -125,6 +126,17 @@ export async function POST(req: NextRequest) {
             where: { id: account.id },
             data: { status: "active", lastVerifiedAt: now },
           });
+          if (account.status === "invalid") {
+            await logCloudAccountStatusChange({
+              resellerId: user.id,
+              accountId: account.id,
+              accountName: account.accountName,
+              from: "invalid",
+              to: "active",
+              trigger: "zones_refresh",
+              detail: `更新地域库时完整同步成功，共 ${instances.length} 台服务器`,
+            });
+          }
         }
         results.push({
           id: account.id,
@@ -138,12 +150,23 @@ export async function POST(req: NextRequest) {
         });
       } catch (e) {
         if (isCloudAccountCredentialError(e)) {
-          await prisma.resellerApiToken
+          const flipped = await prisma.resellerApiToken
             .updateMany({
-              where: { id: account.id, resellerId: user.id },
+              where: { id: account.id, resellerId: user.id, status: { not: "invalid" } },
               data: { status: "invalid" },
             })
-            .catch(() => void 0);
+            .catch(() => ({ count: 0 }));
+          if (flipped.count > 0) {
+            await logCloudAccountStatusChange({
+              resellerId: user.id,
+              accountId: account.id,
+              accountName: account.accountName,
+              from: account.status,
+              to: "invalid",
+              trigger: "zones_refresh",
+              detail: e instanceof Error ? e.message : String(e),
+            });
+          }
         }
         results.push({
           id: account.id,

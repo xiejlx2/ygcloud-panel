@@ -11,6 +11,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
+import type { SessionUser } from "@/lib/types";
 import { assertIsResellerAdmin } from "@/lib/permissions";
 import {
   encryptToken,
@@ -19,7 +20,12 @@ import {
   tokenSuffix,
 } from "@/lib/crypto";
 import { listInstancesDetailed } from "@/lib/cloud";
-import { getKnownZones } from "@/lib/sync";
+import {
+  getKnownZones,
+  isCloudAccountCredentialError,
+  logCloudAccountStatusChange,
+  summarizeZoneFailures,
+} from "@/lib/sync";
 import { ok, err, handleError } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
 
@@ -173,18 +179,22 @@ const VerifyBody = z.object({ id: z.string().min(1) });
 
 export async function PATCH(req: NextRequest) {
   let accountId: string | null = null;
+  let accountName = "";
+  let sessionUser: SessionUser | null = null;
   try {
     const user = await getSession();
     assertIsResellerAdmin(user);
+    sessionUser = user;
     const parsed = VerifyBody.safeParse(await req.json().catch(() => null));
     if (!parsed.success) return err("INVALID_INPUT", "缺少云账户 ID", 400);
     accountId = parsed.data.id;
 
     const account = await prisma.resellerApiToken.findFirst({
       where: { id: accountId, resellerId: user.id },
-      select: { id: true, accountName: true },
+      select: { id: true, accountName: true, status: true },
     });
     if (!account) return err("NOT_FOUND", "云账户不存在", 404);
+    accountName = account.accountName;
 
     const knownZones = await getKnownZones(user.id, account.id);
     const result = await listInstancesDetailed(user.id, {
@@ -192,15 +202,26 @@ export async function PATCH(req: NextRequest) {
       allowInvalidToken: true,
       knownZones,
     });
+    // 部分地域拉取失败 ≠ Key 失效。这里只提示失败地域并保留原状态，
+    // 由后续同步确认真实健康度（历史上这里误把健康 Key 标成“无效”）。
     if (!result.complete) {
-      await prisma.resellerApiToken.update({
-        where: { id: account.id },
-        data: { status: "invalid" },
+      await writeAudit({
+        user,
+        ecsResourceUuid: "-",
+        action: "cloud_account_verify",
+        requestPayload: {
+          accountId: account.id,
+          accountName: account.accountName,
+          ok: false,
+          reason: "SYNC_INCOMPLETE",
+          zoneFailures: result.zoneFailures.slice(0, 5),
+        },
+        errMsg: "部分地域拉取失败，未判定 Key 失效",
       });
       return err(
-        "TOKEN_PARTIAL_ACCESS",
-        "部分地域无法访问，请确认该 Key 已开放全部地域权限",
-        400,
+        "SYNC_INCOMPLETE",
+        `部分地域拉取失败（${summarizeZoneFailures(result.zoneFailures)}），本次未判定 Key 失效，请稍后重试`,
+        502,
       );
     }
 
@@ -209,6 +230,17 @@ export async function PATCH(req: NextRequest) {
       where: { id: account.id },
       data: { lastVerifiedAt: verifiedAt, status: "active" },
     });
+    if (account.status === "invalid") {
+      await logCloudAccountStatusChange({
+        resellerId: user.id,
+        accountId: account.id,
+        accountName: account.accountName,
+        from: "invalid",
+        to: "active",
+        trigger: "verify",
+        detail: `人工校验通过，可访问 ${result.instances.length} 台服务器`,
+      });
+    }
     await writeAudit({
       user,
       ecsResourceUuid: "-",
@@ -216,6 +248,7 @@ export async function PATCH(req: NextRequest) {
       requestPayload: {
         accountId: account.id,
         accountName: account.accountName,
+        ok: true,
         instanceCount: result.instances.length,
       },
     });
@@ -225,10 +258,36 @@ export async function PATCH(req: NextRequest) {
       lastVerifiedAt: verifiedAt,
     });
   } catch (e) {
-    if (accountId) {
-      await prisma.resellerApiToken
-        .updateMany({ where: { id: accountId }, data: { status: "invalid" } })
-        .catch(() => void 0);
+    const message = e instanceof Error ? e.message : String(e);
+    const credentialError = isCloudAccountCredentialError(e);
+    // 只有明确的鉴权失败才改状态；网络/超时/限流等一律保留原状态。
+    if (accountId && credentialError) {
+      const flipped = await prisma.resellerApiToken
+        .updateMany({
+          where: { id: accountId, status: { not: "invalid" } },
+          data: { status: "invalid" },
+        })
+        .catch(() => ({ count: 0 }));
+      if (flipped.count > 0 && sessionUser) {
+        await logCloudAccountStatusChange({
+          resellerId: sessionUser.id,
+          accountId,
+          accountName,
+          from: "active",
+          to: "invalid",
+          trigger: "verify",
+          detail: message,
+        });
+      }
+    }
+    if (accountId && sessionUser) {
+      await writeAudit({
+        user: sessionUser,
+        ecsResourceUuid: "-",
+        action: "cloud_account_verify",
+        requestPayload: { accountId, ok: false, credentialError },
+        errMsg: message.slice(0, 300),
+      }).catch(() => void 0);
     }
     return handleError(e);
   }
